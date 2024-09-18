@@ -4,7 +4,7 @@ from api_integrations import get_all_trends, get_chatgpt_response, cache
 from models import db, Trend, UserQuery
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://kachifo_user:your_password@localhost/kachifo_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://ceo:CEOKachifo@2024@localhost/kachifo_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
