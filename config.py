@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os
 
-load_dotenv('error.env')
+load_dotenv('.env')
 
 class Config:
     GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', 'AIzaSyAVJ_sMio0juSdj7eJSZOKJnZM_8hEGvmo')
