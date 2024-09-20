@@ -51,7 +51,7 @@ cache = Cache(config={'CACHE_TYPE': 'simple'})
 def rate_limited_api_call(func):
     return func()
 
-@cache.memoize(timeout=300)  # Cache for 5 minutes
+@cache.memoize(timeout=60 * 60)  # Cache for 5 minutes
 def get_news_trends(query):
     try:
         url = f"https://newsapi.org/v2/everything?q={query}&apiKey={NEWSAPI_KEY}"
@@ -62,7 +62,7 @@ def get_news_trends(query):
         print(f"Error fetching news trends: {e}")
         return []
 
-@cache.memoize(timeout=300)
+@cache.memoize(timeout=60 * 60)
 def get_reddit_trends(subreddit_name):
     try:
         subreddit = reddit.subreddit(subreddit_name)
@@ -71,7 +71,7 @@ def get_reddit_trends(subreddit_name):
         print(f"Error fetching Reddit trends: {e}")
         return []
 
-@cache.memoize(timeout=300)
+@cache.memoize(timeout=60 * 60)
 def get_youtube_trends(region_code='US'):
     try:
         request = youtube.videos().list(
@@ -86,7 +86,7 @@ def get_youtube_trends(region_code='US'):
         print(f"Error fetching YouTube trends: {e}")
         return []
 
-@cache.memoize(timeout=300)
+@cache.memoize(timeout=60 * 60)
 def get_twitter_trends(woeid=1):
     try:
         trends = twitter.trends.place(_id=woeid)
@@ -95,7 +95,7 @@ def get_twitter_trends(woeid=1):
         print(f"Error fetching Twitter trends: {e}")
         return []
 
-@cache.memoize(timeout=300)
+@cache.memoize(timeout=60 * 60)
 def get_google_trends(query):
     try:
         res = google_search.cse().list(q=query, cx=GOOGLE_CSE_ID).execute()
@@ -104,7 +104,7 @@ def get_google_trends(query):
         print(f"Error fetching Google trends: {e}")
         return []
 
-@cache.memoize(timeout=60)  # Cache ChatGPT responses for 1 minute
+@cache.memoize(timeout=60 * 60)  # Cache ChatGPT responses for 1 minute
 def get_chatgpt_response(prompt):
     try:
         response = openai.Completion.create(

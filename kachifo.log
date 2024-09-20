@@ -17,3 +17,12 @@
 2024-09-20 14:19:08,719 INFO: Request: GET /search
 2024-09-20 14:19:08,719 ERROR: An error occurred: 405 Method Not Allowed: The method is not allowed for the requested URL.
 2024-09-20 14:19:08,720 INFO: 127.0.0.1 - - [20/Sep/2024 14:19:08] "[35m[1mGET /search HTTP/1.1[0m" 500 -
+2024-09-20 14:35:31,662 INFO: Request: GET /search
+2024-09-20 14:35:31,662 ERROR: An error occurred: 405 Method Not Allowed: The method is not allowed for the requested URL.
+2024-09-20 14:35:31,663 INFO: 127.0.0.1 - - [20/Sep/2024 14:35:31] "[35m[1mGET /search?q=tech HTTP/1.1[0m" 500 -
+2024-09-20 14:36:14,495 INFO: Request: GET /trend/1
+2024-09-20 14:36:14,511 ERROR: An error occurred: Neither 'InstrumentedAttribute' object nor 'Comparator' object associated with Trend.query has an attribute 'get'
+2024-09-20 14:36:14,511 INFO: 127.0.0.1 - - [20/Sep/2024 14:36:14] "[35m[1mGET /trend/1 HTTP/1.1[0m" 500 -
+2024-09-20 14:36:35,136 INFO: Request: GET /categories
+2024-09-20 14:36:36,441 INFO: 127.0.0.1 - - [20/Sep/2024 14:36:36] "GET /categories HTTP/1.1" 200 -
+2024-09-20 14:53:49,053 INFO:  * Detected change in 'C:\\Users\\user\\kachifo\\api_integrations.py', reloading
