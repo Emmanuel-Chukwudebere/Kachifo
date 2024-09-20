@@ -111,7 +111,7 @@ function sendMessage(message) {
     .catch(error => {
         // Handle errors and show an error message
         typingBubble.remove();
-        createChatBubble(`Error: ${error.message}`, 'kachifo');
+        createChatBubble(`Unfortunately, I could not find a trend for that. Can you check your internet connection?`, 'kachifo');
         console.error('Error:', error);
     })
     .finally(() => {
@@ -132,3 +132,44 @@ function resetChat() {
 }
 
 // Function to check if the user is on a desktop
+function isDesktop() {
+    return window.innerWidth >= 1024;
+}
+
+// Event listener for the send button
+sendBtn.addEventListener('click', () => sendMessage());
+
+// Event listener for pressing "Enter" key in the input field (only for desktop)
+userInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && isDesktop()) {
+        e.preventDefault();
+        sendMessage();
+    }
+});
+
+// Auto-resize input field and handle typing state
+userInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = (this.scrollHeight) + 'px';
+
+    if (this.value.trim() !== '') {
+        initialView.classList.add('typing');
+        suggestions.classList.add('typing');
+    } else {
+        initialView.classList.remove('typing');
+        suggestions.classList.remove('typing');
+    }
+});
+
+// Event listeners for suggestions
+document.querySelectorAll('.suggestion').forEach(suggestion => {
+    suggestion.addEventListener('click', () => {
+        sendMessage(suggestion.textContent);
+    });
+});
+
+// Event listener for the New Chat icon
+newChatIcon.addEventListener('click', resetChat);
+
+// Initial scroll to bottom on page load
+scrollToBottom();
