@@ -14,3 +14,6 @@
 2024-09-20 13:49:14,693 INFO: 127.0.0.1 - - [20/Sep/2024 13:49:14] "[33mGET /api HTTP/1.1[0m" 404 -
 2024-09-20 13:49:27,401 INFO: Request: GET /
 2024-09-20 13:49:27,402 INFO: 127.0.0.1 - - [20/Sep/2024 13:49:27] "GET / HTTP/1.1" 200 -
+2024-09-20 14:19:08,719 INFO: Request: GET /search
+2024-09-20 14:19:08,719 ERROR: An error occurred: 405 Method Not Allowed: The method is not allowed for the requested URL.
+2024-09-20 14:19:08,720 INFO: 127.0.0.1 - - [20/Sep/2024 14:19:08] "[35m[1mGET /search HTTP/1.1[0m" 500 -
