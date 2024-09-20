@@ -67,6 +67,10 @@ function sendMessage(message) {
     }
     if (message === '') return;
 
+    // Disable the input field and send button
+    userInput.disabled = true;
+    sendBtn.disabled = true;
+
     // Create user message bubble
     createChatBubble(message, 'user');
     userInput.value = '';
@@ -80,15 +84,42 @@ function sendMessage(message) {
     // Show typing indicator
     const typingBubble = createChatBubble('', 'kachifo', true);
 
-    // Simulate Kachifo's response
-    setTimeout(() => {
+    // Fetch response from Flask backend
+    fetch('/search', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: message })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.statusText}`);
+        }
+        return response.json();
+    })
+    .then(data => {
         typingBubble.remove();
-        // const response = generateKachifoResponse(message);  // Placeholder for actual logic to get response
-        // Uncomment the following line and comment out the one above for testing:
-        const response = "You can check out more info at https://wa.me/2347040218132 !";  // Example response
-        createChatBubble(response, 'kachifo');
+        if (data.error) {
+            createChatBubble(`Error: ${data.error}`, 'kachifo');
+        } else {
+            const formattedResponse = formatMessageWithLinks(JSON.stringify(data));
+            createChatBubble(formattedResponse, 'kachifo');
+        }
         scrollToBottom(); // Ensure scroll to the latest Kachifo message
-    }, 3000); // Delay for Kachifo's typing
+    })
+    .catch(error => {
+        // Handle errors and show an error message
+        typingBubble.remove();
+        createChatBubble(`Error: ${error.message}`, 'kachifo');
+        console.error('Error:', error);
+    })
+    .finally(() => {
+        // Re-enable the input field and send button
+        userInput.disabled = false;
+        sendBtn.disabled = false;
+        userInput.focus(); // Focus back on the input field
+    });
 }
 
 // Function to reset the chat
@@ -101,44 +132,3 @@ function resetChat() {
 }
 
 // Function to check if the user is on a desktop
-function isDesktop() {
-    return window.innerWidth >= 1024;
-}
-
-// Event listener for the send button
-sendBtn.addEventListener('click', () => sendMessage());
-
-// Event listener for pressing "Enter" key in the input field (only for desktop)
-userInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && isDesktop()) {
-        e.preventDefault();
-        sendMessage();
-    }
-});
-
-// Auto-resize input field and handle typing state
-userInput.addEventListener('input', function() {
-    this.style.height = 'auto';
-    this.style.height = (this.scrollHeight) + 'px';
-
-    if (this.value.trim() !== '') {
-        initialView.classList.add('typing');
-        suggestions.classList.add('typing');
-    } else {
-        initialView.classList.remove('typing');
-        suggestions.classList.remove('typing');
-    }
-});
-
-// Event listeners for suggestions
-document.querySelectorAll('.suggestion').forEach(suggestion => {
-    suggestion.addEventListener('click', () => {
-        sendMessage(suggestion.textContent);
-    });
-});
-
-// Event listener for the New Chat icon
-newChatIcon.addEventListener('click', resetChat);
-
-// Initial scroll to bottom on page load
-scrollToBottom();

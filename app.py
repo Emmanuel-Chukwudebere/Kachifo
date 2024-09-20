@@ -40,27 +40,38 @@ def search_trends():
     if usage.count >= MAX_PROMPTS:
         return jsonify({"error": "Daily prompt limit reached"}), 429
 
-    query = request.json.get('query')
-    
+    data = request.json
+    query = data.get('query')
+
+    if not query:
+        return jsonify({"error": "Query is required"}), 400
+
     # Log user query
     user_query = UserQuery(query=query)
     db.session.add(user_query)
     db.session.commit()
 
-    trends = get_all_trends(query)
+    try:
+        # Get trends from APIs
+        trends = get_all_trends(query)
 
-    # Store trends in database
-    for category, trend_list in trends.items():
-        for trend in trend_list:
-            new_trend = Trend(query=query, category=category, title=trend)
-            db.session.add(new_trend)
-    db.session.commit()
+        # Store trends in the database
+        for category, trend_list in trends.items():
+            for trend in trend_list:
+                new_trend = Trend(query=query, category=category, title=trend)
+                db.session.add(new_trend)
+        db.session.commit()
 
-    # Update prompt count
-    usage.count += 1
-    db.session.commit()
+        # Update prompt count
+        usage.count += 1
+        db.session.commit()
 
-    return jsonify(trends)
+        return jsonify(trends)
+
+    except Exception as e:
+        logging.error(f"Error processing trends: {str(e)}")
+        return jsonify({"error": "Failed to retrieve trends"}), 500
+
 
 @app.route('/trend/<trend_id>')
 def get_trend_details(trend_id):
@@ -71,29 +82,35 @@ def get_trend_details(trend_id):
     else:
         return jsonify({"error": "Trend not found"}), 404
 
+
 @app.route('/categories')
 def get_categories():
     categories = db.session.query(Trend.category).distinct().all()
     return jsonify({"categories": [category[0] for category in categories]})
+
 
 # Error handling
 @app.errorhandler(404)
 def resource_not_found(e):
     return jsonify(error=str(e)), 404
 
+
 @app.errorhandler(500)
 def internal_server_error(e):
     return jsonify(error="Internal server error"), 500
+
 
 @app.errorhandler(Exception)
 def handle_generic_error(e):
     logging.error(f"An error occurred: {str(e)}")
     return jsonify(error="An unexpected error occurred"), 500
 
+
 # Request logging
 @app.before_request
 def log_request_info():
     logging.info(f"Request: {request.method} {request.path}")
+
 
 if __name__ == '__main__':
     with app.app_context():
