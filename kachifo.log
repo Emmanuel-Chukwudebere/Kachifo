@@ -1,0 +1,16 @@
+2024-09-20 13:44:33,117 INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2024-09-20 13:44:33,130 INFO: [33mPress CTRL+C to quit[0m
+2024-09-20 13:44:33,146 INFO:  * Restarting with stat
+2024-09-20 13:44:37,297 WARNING:  * Debugger is active!
+2024-09-20 13:44:37,476 INFO:  * Debugger PIN: 962-298-723
+2024-09-20 13:46:29,001 INFO: Request: GET /
+2024-09-20 13:46:29,002 INFO: 127.0.0.1 - - [20/Sep/2024 13:46:29] "GET / HTTP/1.1" 200 -
+2024-09-20 13:46:29,306 INFO: Request: GET /favicon.ico
+2024-09-20 13:46:29,307 INFO: 127.0.0.1 - - [20/Sep/2024 13:46:29] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2024-09-20 13:48:15,161 INFO: Request: GET /twitter
+2024-09-20 13:48:15,162 INFO: 127.0.0.1 - - [20/Sep/2024 13:48:15] "[33mGET /twitter HTTP/1.1[0m" 404 -
+2024-09-20 13:49:14,693 INFO: Request: GET /api
+2024-09-20 13:49:14,693 INFO: 127.0.0.1 - - [20/Sep/2024 13:49:14] "[33mGET /api HTTP/1.1[0m" 404 -
+2024-09-20 13:49:27,401 INFO: Request: GET /
+2024-09-20 13:49:27,402 INFO: 127.0.0.1 - - [20/Sep/2024 13:49:27] "GET / HTTP/1.1" 200 -

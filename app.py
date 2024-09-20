@@ -6,7 +6,7 @@ from datetime import date
 import logging
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://ceo:CEOKachifo@2024@localhost/kachifo_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://ceo:CEOKachifo%402024@localhost/kachifo_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
