@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kachifo</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <header>
+        <div class="new-chat-icon">
+            <img src="icons/chat-24-regular.svg" alt="New Chat Icon">
+        </div>
+    </header>
+
+    <main class="chat-container">
+        <div class="initial-view">
+            <section class="kachifo-logo">
+                <img src="logo/kachifo-logo.svg" alt="Kachifo Logo">
+            </section>
+
+            <section class="greeting">
+                <p>Hello 👋! What trend would you like to discover today?</p>
+            </section>
+
+            <section class="suggestions">
+                <div class="suggestion">What's trending in tech right now?</div>
+                <div class="suggestion">What skills should I learn to stay relevant in design?</div>
+                <div class="suggestion">What's trending in health and wellness?</div>
+                <div class="suggestion">Find the hottest travel destinations right now.</div>
+                <div class="suggestion">What are competitors doing in the fashion space?</div>
+                <div class="suggestion">What are the trending topics for YouTube creators?</div>
+            </section>
+        </div>
+
+        <section class="chat-window">
+            <!-- Chat messages will appear here dynamically -->
+        </section>
+    </main>
+
+    <footer class="input-container">
+        <textarea id="user-input" placeholder="Discover trends ↝" rows="1"></textarea>
+        <button id="send-btn">
+            <img src="icons/send-24-regular.svg" alt="Send Icon">
+        </button>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

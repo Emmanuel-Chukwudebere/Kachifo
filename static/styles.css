@@ -38,7 +38,7 @@ main {
     flex-direction: column;
     margin-top: 60px;
     /* Adjusted to account for fixed header */
-    margin-bottom: 80px;
+    margin-bottom: 100px;
     /* Adjusted to account for input container */
     overflow-y: auto;
     position: relative;
@@ -119,7 +119,7 @@ main {
     left: 0;
     right: 0;
     bottom: 0;
-    padding-top: 44px;
+    padding-top: 64px;
     display: flex;
     flex-direction: column;
     gap: 16px;
