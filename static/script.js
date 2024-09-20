@@ -5,8 +5,8 @@ const chatWindow = document.querySelector('.chat-window');
 const initialView = document.querySelector('.initial-view');
 const suggestions = document.querySelector('.suggestions');
 const newChatIcon = document.querySelector('.new-chat-icon');
-const loadingGifPath = 'icons/typing-gif.gif';  // Placeholder for loading gif path
-const kachifoLogoPath = 'logo/kachifo-logo-small.svg';  // Placeholder for Kachifo logo path
+const loadingGifPath = 'static/icons/typing-gif.gif';  // Placeholder for loading gif path
+const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg';  // Placeholder for Kachifo logo path
 
 // Function to automatically scroll to the latest message
 function scrollToBottom() {
