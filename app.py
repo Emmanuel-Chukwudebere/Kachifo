@@ -5,7 +5,7 @@ from models import db, Trend, UserQuery, DailyUsage
 from datetime import date
 import logging
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path='/static')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://ceo:CEOKachifo%402024@localhost/kachifo_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
