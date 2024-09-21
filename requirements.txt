@@ -10,5 +10,3 @@ twitter
 openai
 flask-caching
 ratelimit
-gunicorn
-flask-cors
