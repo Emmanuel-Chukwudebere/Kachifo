@@ -14,10 +14,10 @@ load_dotenv()
 # Initialize the Flask app
 app = Flask(__name__)
 
-# Database (MariaDB) configuration using environment variable
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
+# Load configuration from environment variables (ensure they are set in production)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'mysql+pymysql://ceo:CEOKachifo2024@kachifo.cteuykcg0zmb.eu-north-1.rds.amazonaws.com:3306/kachifo')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['CACHE_TYPE'] = 'simple'
+app.config['CACHE_TYPE'] = 'simple'  # Simple cache, replace with Redis in production if needed
 
 # Initialize the database and cache
 db.init_app(app)
