@@ -32,18 +32,19 @@ header {
     cursor: pointer;
 }
 
-/* Main Container */
 main {
+    flex-grow: 1;
     display: flex;
     flex-direction: column;
-    justify-content: center; /* Vertically center */
-    align-items: center;     /* Horizontally center */
-    max-width: 800px;
-    height: calc(100vh - 80px); /* Full height minus header and footer */
-    margin-left: auto; /* Center horizontally */
-    margin-right: auto; /* Center horizontally */
-    padding-top: 50px;  /* Adjust for fixed header */
-    padding-bottom: 80px; /* Adjust for input field */
+    margin-top: 50px;
+    padding-top: 50px;
+    /* Adjusted to account for fixed header */
+    margin-bottom: 80px;
+    /* Adjusted to account for input container */
+    overflow-y: auto;
+    position: relative;
+    margin-left: 16px;
+    margin-right: 16px;
 }
 
 /* Initial View */
@@ -53,6 +54,7 @@ main {
     align-items: center;
     justify-content: flex-start;
     min-height: calc(100vh - 140px);
+    /* Adjusted to account for header and input container */
     transition: transform 0.5s ease, opacity 0.5s ease;
     position: absolute;
     top: 0;
@@ -113,7 +115,11 @@ main {
 
 /* Chat Window */
 .chat-window {
-    width: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     padding-top: 52px;
     margin-top: 52px;
     display: flex;
@@ -121,9 +127,6 @@ main {
     gap: 16px;
     overflow-y: auto;
     background-color: #fff;
-    max-width: 800px;
-    margin-left: auto; /* Center horizontally */
-    margin-right: auto; /* Center horizontally */
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.5s ease;
@@ -146,6 +149,7 @@ main {
 /* Links in Chat Messages */
 .message-content a {
     color: #1e90ff;
+    /* A blue color to make the link stand out */
     text-decoration: underline;
     word-wrap: break-word;
     overflow-wrap: break-word;
@@ -155,7 +159,9 @@ main {
 
 .message-content a:hover {
     color: #1c6eaa;
+    /* Darker blue when hovered */
     text-decoration: none;
+    /* Remove underline on hover */
 }
 
 /* User and Kachifo Messages */
@@ -165,6 +171,7 @@ main {
     word-wrap: break-word;
     overflow-wrap: break-word;
     flex-shrink: 0;
+    /* Prevent messages from shrinking */
 }
 
 .user-message,
@@ -186,6 +193,7 @@ main {
     display: flex;
     align-items: flex-start;
     gap: 0px;
+    /* Add some space between the logo and the message */
     align-self: flex-start;
     width: 100%;
 }
@@ -196,11 +204,13 @@ main {
     flex: 1;
     min-width: 0;
     max-width: calc(100% - 44px);
+    /* Adjust based on logo size and gap */
 }
 
 /* Ensure the link's container doesn't shrink or mess up layout */
 .kachifo-message .message-content a {
     max-width: calc(100% - 44px);
+    /* Adjust width based on design */
     display: inline-block;
 }
 
@@ -209,6 +219,7 @@ main {
     height: 44px;
     padding-top: 8px;
     flex-shrink: 0;
+    /* Prevent logo from shrinking */
 }
 
 /* Loading GIF */
@@ -230,9 +241,7 @@ main {
     background-color: #fff;
     box-sizing: border-box;
     z-index: 10;
-    max-width: 800px;
-    margin-left: auto; /* Center horizontally */
-    margin-right: auto; /* Center horizontally */
+    
 }
 
 #user-input {
@@ -244,11 +253,15 @@ main {
     resize: none;
     max-height: 100px;
     height: auto;
+    /* Adjusts height automatically */
     overflow-y: auto;
+    /* Allows vertical scrolling */
     box-sizing: border-box;
     scrollbar-width: none;
+    /* Hides scrollbar in Firefox */
 }
 
+/* Hide scrollbar in WebKit-based browsers (Chrome, Safari) */
 #user-input::-webkit-scrollbar {
     display: none;
 }
@@ -269,14 +282,6 @@ main {
 }
 
 /* Responsive Design */
-@media (max-width: 800px) {
-    main, .chat-window, .input-container {
-        max-width: 100%;
-        margin-left: 16px;
-        margin-right: 16px;
-    }
-}
-
 @media (max-width: 600px) {
     .suggestions {
         grid-template-columns: 1fr;
@@ -288,6 +293,7 @@ main {
 
     .kachifo-message .message-content {
         max-width: calc(100% - 44px);
+        /* Adjust if needed for smaller screens */
     }
 }
 
