@@ -6,27 +6,30 @@ from api_integrations import get_all_trends, get_chatgpt_response, cache
 from models import db, Trend, UserQuery, DailyUsage
 from datetime import date
 
+# Initialize the Flask app
 app = Flask(__name__)
 
-# Database (MariaDB) configuration using environment variable
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'mysql+pymysql://ceo:CEOKachifo2024@kachifo.cteuykcg0zmb.eu-north-1.rds.amazonaws.com:3306/kachifo')
+# Load configuration from environment variables (ensure they are set in production)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+    'DATABASE_URL', 'mysql+pymysql://ceo:CEOKachifo2024@kachifo.cteuykcg0zmb.eu-north-1.rds.amazonaws.com:3306/kachifo'
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['CACHE_TYPE'] = 'simple'  # Simple cache, replace with Redis in production if needed
 
-# Initialize database and cache
+# Initialize the database and cache
 db.init_app(app)
 cache.init_app(app)
 
-# Set up logging to stdout (Render logs automatically capture these)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
-
-# Optionally, if you still want to log to a file (not recommended for Render):
-file_handler = logging.FileHandler('kachifo.log')
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
-
-# Add the file handler to the logger (if needed)
-logging.getLogger().addHandler(file_handler)
-
+# Set up logging for production
+if not app.debug:
+    # Log to stdout (Render captures these logs automatically)
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+    
+    # Optionally log to a file (useful if you need a backup log)
+    file_handler = logging.FileHandler('kachifo.log')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
+    app.logger.addHandler(file_handler)
 
 MAX_PROMPTS = 50
 
@@ -52,6 +55,7 @@ def search_trends():
     if not query:
         return jsonify({"error": "Please provide a search query."}), 400
 
+    # Log the user query
     user_query = UserQuery(query=query)
     db.session.add(user_query)
     db.session.commit()
@@ -131,6 +135,6 @@ def log_request_info():
     logging.info(f"Request: {request.method} {request.path}")
 
 if __name__ == '__main__':
+    # Production-ready server should use Gunicorn or similar WSGI server
     with app.app_context():
         db.create_all()
-    app.run(debug=True)
