@@ -37,6 +37,8 @@ main {
     display: flex;
     flex-direction: column;
     margin-top: 44px;
+    padding-top: 44px;
+    padding-bottom: 80px;
     /* Adjusted to account for fixed header */
     margin-bottom: 80px;
     /* Adjusted to account for input container */
@@ -120,6 +122,9 @@ main {
     right: 0;
     bottom: 0;
     padding-top: 44px;
+    margin-top: 44px;
+    margin-bottom: 80px;
+    padding-bottom: 80px;
     display: flex;
     flex-direction: column;
     gap: 16px;
