@@ -5,33 +5,33 @@ from flask_sqlalchemy import SQLAlchemy
 from api_integrations import get_all_trends, get_chatgpt_response, cache
 from models import db, Trend, UserQuery, DailyUsage
 from datetime import date
+from dotenv import load_dotenv
+import asyncio
+
+# Load environment variables
+load_dotenv()
 
 # Initialize the Flask app
 app = Flask(__name__)
 
-# Load configuration from environment variables (ensure they are set in production)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    'DATABASE_URL', 'mysql+pymysql://ceo:CEOKachifo2024@kachifo.cteuykcg0zmb.eu-north-1.rds.amazonaws.com:3306/kachifo'
-)
+# Database (MariaDB) configuration using environment variable
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['CACHE_TYPE'] = 'simple'  # Simple cache, replace with Redis in production if needed
+app.config['CACHE_TYPE'] = 'redis'
+app.config['CACHE_REDIS_URL'] = os.getenv('REDIS_URL')
 
 # Initialize the database and cache
 db.init_app(app)
 cache.init_app(app)
 
 # Set up logging for production
-if not app.debug:
-    # Log to stdout (Render captures these logs automatically)
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
-    
-    # Optionally log to a file (useful if you need a backup log)
-    file_handler = logging.FileHandler('kachifo.log')
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
-    app.logger.addHandler(file_handler)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
+file_handler = logging.FileHandler('kachifo.log')
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
+app.logger.addHandler(file_handler)
 
-MAX_PROMPTS = 50
+MAX_PROMPTS = int(os.getenv('MAX_PROMPTS', 50))
 
 # Utility function to track daily prompt usage
 def get_prompt_count():
@@ -48,10 +48,9 @@ def home():
     return render_template('index.html')
 
 @app.route('/search', methods=['POST'])
-def search_trends():
+async def search_trends():
     data = request.json
     query = data.get('query')
-
     if not query:
         return jsonify({"error": "Please provide a search query."}), 400
 
@@ -64,17 +63,17 @@ def search_trends():
         # Check the daily limit of prompts
         usage = get_prompt_count()
         if usage.count >= MAX_PROMPTS:
-            logging.warning('Daily prompt limit reached')
+            app.logger.warning('Daily prompt limit reached')
             return jsonify({"error": "You've reached the maximum number of prompts for today. Please try again tomorrow."}), 429
 
         # Try getting trends from cache, if available
         cached_trends = cache.get(query)
         if cached_trends:
-            logging.info(f"Cache hit for query: {query}")
+            app.logger.info(f"Cache hit for query: {query}")
             return jsonify({"response": cached_trends})
 
         # Get trends from external APIs
-        trends = get_all_trends(query)
+        trends = await get_all_trends(query)
 
         # Formulate structured prompt for ChatGPT
         chatgpt_prompt = f"""
@@ -83,7 +82,7 @@ def search_trends():
         """
 
         # Get response from ChatGPT
-        chatgpt_response = get_chatgpt_response(chatgpt_prompt)
+        chatgpt_response = await get_chatgpt_response(chatgpt_prompt)
 
         # Cache the result for future queries
         cache.set(query, chatgpt_response)
@@ -92,11 +91,10 @@ def search_trends():
         usage.count += 1
         db.session.commit()
 
-        logging.info(f"Trends retrieved successfully for query: {query}")
+        app.logger.info(f"Trends retrieved successfully for query: {query}")
         return jsonify({"response": chatgpt_response})
-
     except Exception as e:
-        logging.error(f"Error processing trends for query: {query}: {str(e)}")
+        app.logger.error(f"Error processing trends for query: {query}: {str(e)}")
         return jsonify({"error": "Something went wrong while retrieving trends. Please try again later."}), 500
 
 @app.route('/categories')
@@ -107,34 +105,38 @@ def get_categories():
         if not categories:
             categories = db.session.query(Trend.category).distinct().all()
             cache.set("categories", categories)
-        logging.info('Categories retrieved successfully')
+        app.logger.info('Categories retrieved successfully')
         return jsonify({"categories": [category[0] for category in categories]})
     except Exception as e:
-        logging.error(f"Error retrieving categories: {str(e)}")
+        app.logger.error(f"Error retrieving categories: {str(e)}")
         return jsonify({"error": "Failed to retrieve categories. Please try again later."}), 500
 
 # Error handling for 404 and 500 errors
 @app.errorhandler(404)
 def resource_not_found(e):
-    logging.error(f"Resource not found: {str(e)}")
+    app.logger.error(f"Resource not found: {str(e)}")
     return jsonify(error="The requested resource could not be found."), 404
 
 @app.errorhandler(500)
 def internal_server_error(e):
-    logging.error(f"Internal server error: {str(e)}")
+    app.logger.error(f"Internal server error: {str(e)}")
     return jsonify(error="Internal server error. Please try again later."), 500
 
 @app.errorhandler(Exception)
 def handle_generic_error(e):
-    logging.error(f"An unexpected error occurred: {str(e)}")
+    app.logger.error(f"An unexpected error occurred: {str(e)}")
     return jsonify(error="An unexpected error occurred. Please try again later."), 500
 
 # Request logging
 @app.before_request
 def log_request_info():
-    logging.info(f"Request: {request.method} {request.path}")
+    app.logger.info(f"Request: {request.method} {request.path}")
 
 if __name__ == '__main__':
     # Production-ready server should use Gunicorn or similar WSGI server
     with app.app_context():
+        app.logger.info("Creating all tables if they don't exist.")
         db.create_all()
+    
+    # For development only. In production, use Gunicorn or similar.
+    # app.run(debug=False, host='0.0.0.0')
