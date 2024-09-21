@@ -39,7 +39,7 @@ main {
     margin-top: 44px;
     padding-top: 44px;
     /* Adjusted to account for fixed header */
-    margin-bottom: 84px;
+    margin-bottom: 100px;
     /* Adjusted to account for input container */
     overflow-y: auto;
     position: relative;
