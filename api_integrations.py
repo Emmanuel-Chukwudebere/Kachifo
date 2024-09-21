@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize cache
-cache = Cache(config={'CACHE_TYPE': 'simple'})
+cache = Cache(config={'CACHE_TYPE': 'redis', 'CACHE_REDIS_URL': os.getenv('REDIS_URL')})
 
 # Environment variables for API keys
 NEWS_API_KEY = os.getenv('NEWS_API_KEY')
@@ -151,7 +151,7 @@ async def get_all_trends(query):
             get_twitter_trends(session, query)
         ]
         results = await asyncio.gather(*tasks)
-        google_trends = get_google_trends(query)  # This is not async, so we call it separately
+        google_trends = await asyncio.to_thread(get_google_trends, query)  # Run synchronous function in a separate thread
 
     trends = {
         'news': results[0],
