@@ -12,7 +12,7 @@ cryptography==43.0.1
 distro==1.9.0
 Flask==3.0.3
 Flask-Caching==2.3.0
-Flask-Cors==3.0.10
+Flask-Cors==4.0.2
 Flask-SQLAlchemy==3.1.1
 google-api-core==2.20.0
 google-api-python-client==2.146.0
@@ -20,7 +20,7 @@ google-auth==2.35.0
 google-auth-httplib2==0.2.0
 googleapis-common-protos==1.65.0
 greenlet==3.1.0
-gunicorn==20.1.0
+gunicorn==22.0.0
 h11==0.14.0
 httpcore==1.0.5
 httplib2==0.22.0
