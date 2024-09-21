@@ -132,5 +132,6 @@ def log_request_info():
 
 if __name__ == '__main__':
     with app.app_context():
+        logging.info("Creating all tables if they don't exist.")
         db.create_all()
     app.run(debug=True)
