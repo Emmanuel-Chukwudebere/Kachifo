@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize cache
-cache = Cache(config={'CACHE_TYPE': 'redis', 'CACHE_REDIS_URL': os.getenv('REDIS_URL')})
+cache = Cache(config={'CACHE_TYPE': 'simple'})
 
 # Environment variables for API keys
 NEWS_API_KEY = os.getenv('NEWS_API_KEY')
