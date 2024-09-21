@@ -17,8 +17,7 @@ app = Flask(__name__)
 # Database (MariaDB) configuration using environment variable
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['CACHE_TYPE'] = 'redis'
-app.config['CACHE_REDIS_URL'] = os.getenv('REDIS_URL')
+app.config['CACHE_TYPE'] = 'simple'
 
 # Initialize the database and cache
 db.init_app(app)
