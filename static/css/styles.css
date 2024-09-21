@@ -36,10 +36,10 @@ main {
     flex-grow: 1;
     display: flex;
     flex-direction: column;
-    margin-top: 44px;
-    padding-top: 44px;
+    margin-top: 50px;
+    padding-top: 50px;
     /* Adjusted to account for fixed header */
-    margin-bottom: 100px;
+    margin-bottom: 80px;
     /* Adjusted to account for input container */
     overflow-y: auto;
     position: relative;
@@ -120,8 +120,8 @@ main {
     left: 0;
     right: 0;
     bottom: 0;
-    padding-top: 44px;
-    margin-top: 44px;
+    padding-top: 52px;
+    margin-top: 52px;
     display: flex;
     flex-direction: column;
     gap: 16px;
