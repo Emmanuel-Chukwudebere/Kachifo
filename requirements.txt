@@ -18,6 +18,7 @@ Flask[async]
 Flask-Caching
 Flask-Cors
 Flask-SQLAlchemy
+flask_talisman
 Flax
 google-api-core
 google-api-python-client
