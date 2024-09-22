@@ -10,8 +10,8 @@ from datetime import datetime
 logging.basicConfig(filename="Kachifo.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Initialize Hugging Face summarization and text generation pipelines
-hugging_face_summarizer = pipeline('summarization')
-hugging_face_generator = pipeline('text-generation', model='gpt2', framework="pt") #uses PyTorch
+hugging_face_summarizer = pipeline('summarization', model='facebook/bart-large-cnn', framework="pt")  # More accurate summarization model
+hugging_face_generator = pipeline('text-generation', model='gpt2', framework="pt")  # Uses PyTorch
 
 # API keys from environment variables
 YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
@@ -27,27 +27,30 @@ REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT')
 
 # Helper function for input sanitization
 def sanitize_input(query):
-    # Basic sanitization to prevent SQL injection and other attacks
-    return re.sub(r"[;--]", "", query)
+    """Sanitize input to prevent SQL injection and other attacks."""
+    return re.sub(r"[^\w\s]", "", query).strip()
 
 # Reddit Integration
 def fetch_reddit_data(query):
+    """Fetch trending Reddit posts based on query."""
     query = sanitize_input(query)
     reddit_auth_url = "https://www.reddit.com/api/v1/access_token"
     auth = HTTPBasicAuth(REDDIT_CLIENT_ID, REDDIT_SECRET)
     data = {'grant_type': 'client_credentials'}
     headers = {'User-Agent': REDDIT_USER_AGENT}
-    
+
     try:
+        # Obtain OAuth token
         auth_response = requests.post(reddit_auth_url, auth=auth, data=data, headers=headers)
         auth_response.raise_for_status()
         access_token = auth_response.json().get('access_token')
-
         headers['Authorization'] = f'bearer {access_token}'
+        
+        # Make search request to Reddit
         search_url = f"https://oauth.reddit.com/search?q={query}&limit=10"
         search_response = requests.get(search_url, headers=headers)
         search_response.raise_for_status()
-        
+
         reddit_posts = search_response.json().get('data', {}).get('children', [])
         structured_results = []
 
@@ -56,7 +59,7 @@ def fetch_reddit_data(query):
             url = f"https://www.reddit.com{post['data'].get('permalink', '')}"
             body = post['data'].get('selftext', '')
             
-            # Summarize post body
+            # Summarize post content if available
             if body:
                 summary = hugging_face_summarizer(body, max_length=50, min_length=25, do_sample=False)[0]['summary_text']
             else:
@@ -65,12 +68,13 @@ def fetch_reddit_data(query):
             structured_results.append({'title': title, 'url': url, 'summary': summary})
         
         return structured_results
-    except Exception as e:
-        logging.error(f"Reddit API failed: {str(e)}")
+    except requests.RequestException as e:
+        logging.error(f"Reddit API error: {e}")
         return [{'error': 'Failed to fetch data from Reddit. Please try again later.'}]
 
 # Twitter Integration
 def fetch_twitter_data(query):
+    """Fetch trending Twitter tweets based on query."""
     query = sanitize_input(query)
     search_url = f"https://api.twitter.com/1.1/search/tweets.json?q={query}&count=10"
     headers = {
@@ -79,6 +83,7 @@ def fetch_twitter_data(query):
     }
     
     try:
+        # Make search request to Twitter
         response = requests.get(search_url, headers=headers)
         response.raise_for_status()
         tweets = response.json().get('statuses', [])
@@ -88,22 +93,24 @@ def fetch_twitter_data(query):
             text = tweet.get('text', 'No text available')
             tweet_url = f"https://twitter.com/user/status/{tweet.get('id_str', '')}"
             
-            # Summarize tweet
+            # Summarize tweet content
             summary = hugging_face_summarizer(text, max_length=30, min_length=10, do_sample=False)[0]['summary_text']
             
             structured_results.append({'tweet': text, 'url': tweet_url, 'summary': summary})
         
         return structured_results
-    except Exception as e:
-        logging.error(f"Twitter API failed: {str(e)}")
+    except requests.RequestException as e:
+        logging.error(f"Twitter API error: {e}")
         return [{'error': 'Failed to fetch data from Twitter. Please try again later.'}]
 
 # YouTube Integration
 def fetch_youtube_data(query):
+    """Fetch trending YouTube videos based on query."""
     query = sanitize_input(query)
     youtube_search_url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=10&q={query}&key={YOUTUBE_API_KEY}"
     
     try:
+        # Make search request to YouTube
         response = requests.get(youtube_search_url)
         response.raise_for_status()
         videos = response.json().get('items', [])
@@ -117,16 +124,18 @@ def fetch_youtube_data(query):
             structured_results.append({'title': title, 'url': url, 'summary': 'No summary available for videos.'})
         
         return structured_results
-    except Exception as e:
-        logging.error(f"YouTube API failed: {str(e)}")
+    except requests.RequestException as e:
+        logging.error(f"YouTube API error: {e}")
         return [{'error': 'Failed to fetch data from YouTube. Please try again later.'}]
 
 # Google News Integration
 def fetch_google_news(query):
+    """Fetch trending news from Google based on query."""
     query = sanitize_input(query)
     google_search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&cx={os.getenv('GOOGLE_CSE_ID')}&key={GOOGLE_API_KEY}"
     
     try:
+        # Make search request to Google News
         response = requests.get(google_search_url)
         response.raise_for_status()
         news_items = response.json().get('items', [])
@@ -140,13 +149,13 @@ def fetch_google_news(query):
             structured_results.append({'title': title, 'url': url, 'summary': snippet})
         
         return structured_results
-    except Exception as e:
-        logging.error(f"Google News API failed: {str(e)}")
+    except requests.RequestException as e:
+        logging.error(f"Google News API error: {e}")
         return [{'error': 'Failed to fetch data from Google News. Please try again later.'}]
 
 # Main function to fetch all data
 def fetch_trending_topics(query):
-    """Fetch trending topics from all sources."""
+    """Fetch trending topics from all integrated sources."""
     logging.info(f"Fetching trending topics for query: {query}")
 
     reddit_data = fetch_reddit_data(query)
