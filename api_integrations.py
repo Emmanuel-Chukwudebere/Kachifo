@@ -45,7 +45,7 @@ def rate_limited(max_calls, time_frame):
 async def get_chatgpt_response(prompt):
     try:
         response = await openai.ChatCompletion.acreate(
-    model="gpt-4o-mini",  # You can also use "gpt-4" if available
+    model="gpt-3.5-turbo",  # You can also use "gpt-4" if available
     messages=[{"role": "user", "content": prompt}],
     max_tokens=250,
     temperature=0.7
