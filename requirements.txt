@@ -1,8 +1,6 @@
 aiohttp
 aioflask
 annotated-types
-anyio
-asgiref
 blinker
 cachelib
 cachetools
