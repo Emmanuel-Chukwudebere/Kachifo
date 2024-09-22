@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Initialize cache
 cache = Cache(config={'CACHE_TYPE': 'simple'})
 
-# Environment variables for API keys
+# Load API keys from environment variables
 NEWS_API_KEY = os.getenv('NEWS_API_KEY')
 REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID')
 REDDIT_SECRET = os.getenv('REDDIT_SECRET')
@@ -24,9 +24,11 @@ YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
 TWITTER_BEARER_TOKEN = os.getenv('TWITTER_BEARER_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
+# Initialize OpenAI key
 openai.api_key = OPENAI_API_KEY
 
-# Rate limiting decorator
+
+# Rate-limiting decorator
 def rate_limited(max_calls, time_frame):
     def decorator(func):
         calls = []
@@ -41,19 +43,21 @@ def rate_limited(max_calls, time_frame):
         return wrapper
     return decorator
 
+
 @rate_limited(max_calls=5, time_frame=60)
 async def get_chatgpt_response(prompt):
     try:
         response = await openai.ChatCompletion.acreate(
-    model="gpt-3.5-turbo",  # You can also use "gpt-4" if available
-    messages=[{"role": "user", "content": prompt}],
-    max_tokens=250,
-    temperature=0.7
-)
-        return response.choices[0].text.strip()
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=250,
+            temperature=0.7
+        )
+        return response.choices[0].message['content'].strip()
     except Exception as e:
-        logger.error(f"OpenAI API error: {str(e)}")  # Log the complete error
+        logger.error(f"OpenAI API error: {str(e)}")
         return "Sorry, I couldn't generate a response at this time."
+
 
 async def get_news_trends(session, query):
     try:
@@ -69,6 +73,7 @@ async def get_news_trends(session, query):
     except Exception as e:
         logger.error(f"Error fetching news trends: {e}")
         return ["Error fetching news trends."]
+
 
 async def get_reddit_trends(session, query):
     try:
@@ -93,6 +98,7 @@ async def get_reddit_trends(session, query):
         logger.error(f"Error fetching Reddit trends: {e}")
         return ["Error fetching Reddit trends."]
 
+
 async def get_youtube_trends(session, query):
     try:
         url = f'https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&key={YOUTUBE_API_KEY}&maxResults=5'
@@ -108,6 +114,7 @@ async def get_youtube_trends(session, query):
         logger.error(f"Error fetching YouTube trends: {e}")
         return ["Error fetching YouTube trends."]
 
+
 async def get_twitter_trends(session, query):
     try:
         headers = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
@@ -115,7 +122,7 @@ async def get_twitter_trends(session, query):
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 data = await response.json()
-                tweets = data['data']
+                tweets = data.get('data', [])
                 return [f"{tweet['text']} - Tweet ID: {tweet['id']}" for tweet in tweets]
             else:
                 logger.warning(f"Twitter API returned status code {response.status}")
@@ -123,6 +130,7 @@ async def get_twitter_trends(session, query):
     except Exception as e:
         logger.error(f"Error fetching Twitter trends: {e}")
         return ["Error fetching Twitter trends."]
+
 
 @cache.memoize(timeout=3600)
 def get_google_trends(query):
@@ -144,6 +152,7 @@ def get_google_trends(query):
         logger.error(f"Error fetching Google trends: {e}")
         return ["Error fetching Google trends."]
 
+
 async def get_all_trends(query):
     async with aiohttp.ClientSession() as session:
         tasks = [
@@ -153,7 +162,7 @@ async def get_all_trends(query):
             get_twitter_trends(session, query)
         ]
         results = await asyncio.gather(*tasks)
-        google_trends = await asyncio.to_thread(get_google_trends, query)  # Run synchronous function in a separate thread
+        google_trends = await asyncio.to_thread(get_google_trends, query)
 
     trends = {
         'news': results[0],
@@ -163,10 +172,9 @@ async def get_all_trends(query):
         'google': google_trends,
     }
 
-    formatted_trends = ""
-    for category, trend_list in trends.items():
-        formatted_trends += f"\n{category.capitalize()} trends:\n"
-        for trend in trend_list:
-            formatted_trends += f"- {trend}\n"
+    formatted_trends = "\n".join(
+        f"{category.capitalize()} trends:\n" + "\n".join(f"- {trend}" for trend in trend_list) 
+        for category, trend_list in trends.items()
+    )
     
     return formatted_trends
