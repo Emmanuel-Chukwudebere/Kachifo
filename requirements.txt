@@ -37,7 +37,6 @@ Jinja2
 jiter
 MarkupSafe
 openai
---upgrade pip
 praw
 prawcore
 proto-plus
