@@ -4,7 +4,7 @@ import logging
 from functools import wraps
 import time
 import aiohttp
-from openai import AsyncOpenAI
+import openai
 from flask_caching import Cache
 from pytrends.request import TrendReq
 
@@ -44,8 +44,9 @@ def rate_limited(max_calls, time_frame):
 @rate_limited(max_calls=5, time_frame=60)
 async def get_chatgpt_response(prompt):
     try:
-        client = AsyncOpenAI()
-completion = await client.chat.completions.create(model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}]),
+        response = await openai.ChatCompletion.acreate(
+    model="gpt-4o-mini",  # You can also use "gpt-4" if available
+    messages=[{"role": "user", "content": prompt}],
     max_tokens=250,
     temperature=0.7
 )
