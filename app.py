@@ -14,128 +14,134 @@ load_dotenv()
 # Initialize the Flask app
 app = Flask(__name__)
 
-# Load configuration from environment variables (ensure they are set in production)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'mysql+pymysql://ceo:CEOKachifo2024@kachifo.cteuykcg0zmb.eu-north-1.rds.amazonaws.com:3306/kachifo')
+# Load configuration from environment variables
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+    'DATABASE_URL', 'mysql+pymysql://ceo:CEOKachifo2024@kachifo.cteuykcg0zmb.eu-north-1.rds.amazonaws.com:3306/kachifo'
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['CACHE_TYPE'] = 'simple'  # Simple cache, replace with Redis in production if needed
+app.config['CACHE_TYPE'] = 'simple'
 
 # Initialize the database and cache
 db.init_app(app)
 cache.init_app(app)
 
 # Set up logging for production
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
-file_handler = logging.FileHandler('kachifo.log')
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
-app.logger.addHandler(file_handler)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
-MAX_PROMPTS = int(os.getenv('MAX_PROMPTS', 50))
-
-# Utility function to track daily prompt usage
-def get_prompt_count():
-    today = date.today()
-    usage = DailyUsage.query.filter_by(date=today).first()
-    if not usage:
-        usage = DailyUsage(date=today, count=0)
-        db.session.add(usage)
-        db.session.commit()
-    return usage
+# ---------------------------- ROUTES ---------------------------- #
 
 @app.route('/')
 def home():
+    """Render the homepage."""
     return render_template('index.html')
 
 @app.route('/search', methods=['POST'])
-async def search_trends():
-    data = request.json
-    query = data.get('query')
+def search():
+    """Search for trends based on user input."""
+    query = request.form.get('query')
+    
     if not query:
-        return jsonify({"error": "Please provide a search query."}), 400
+        return jsonify({'error': 'Query is required'}), 400
 
-    # Log the user query
-    user_query = UserQuery(query=query)
-    db.session.add(user_query)
+    # Universal prompt limit check
+    today = date.today()
+    daily_usage = DailyUsage.query.filter_by(date=today).first()
+    
+    if daily_usage and daily_usage.usage_count >= 70:
+        return jsonify({'error': 'Daily limit of 70 prompts reached. Try again tomorrow.'}), 403
+
+    # Try to retrieve cached result
+    cached_result = cache.get(query.lower())
+    if cached_result:
+        return jsonify({'result': cached_result})
+
+    # Log the user query to the database
+    try:
+        user_query = UserQuery(query=query.lower())
+        db.session.add(user_query)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Database error: {str(e)}")
+
+    # Fetch trends asynchronously
+    try:
+        trends = asyncio.run(get_all_trends(query))
+        # Cache the result for future queries
+        cache.set(query.lower(), trends)
+    except Exception as e:
+        logging.error(f"Error fetching trends: {str(e)}")
+        trends = "Sorry, we couldn't fetch trends at this time."
+
+    return jsonify({'result': trends})
+
+@app.route('/chat', methods=['POST'])
+async def chat():
+    """Get response from ChatGPT based on the user's prompt."""
+    prompt = request.form.get('prompt')
+    
+    if not prompt:
+        return jsonify({'error': 'Prompt is required'}), 400
+
+    # Universal prompt limit check
+    today = date.today()
+    daily_usage = DailyUsage.query.filter_by(date=today).first()
+    
+    if daily_usage and daily_usage.usage_count >= 70:
+        return jsonify({'error': 'Daily limit of 70 prompts reached. Try again tomorrow.'}), 403
+
+    # Fetch the ChatGPT response asynchronously
+    response = await get_chatgpt_response(prompt)
+    return jsonify({'response': response})
+
+@app.route('/categories', methods=['GET'])
+def categories():
+    """Return available categories for trends (this route can be customized further)."""
+    categories = ["Tech", "Design", "Software", "Medicine", "Finance"]
+    return jsonify({'categories': categories})
+
+@app.route('/trend_details/<int:trend_id>', methods=['GET'])
+def trend_details(trend_id):
+    """Fetch details of a specific trend by ID."""
+    trend = Trend.query.get(trend_id)
+    if trend:
+        return jsonify({
+            'id': trend.id,
+            'name': trend.name,
+            'description': trend.description,
+            'source': trend.source
+        })
+    return jsonify({'error': 'Trend not found'}), 404
+
+# ---------------------- DATABASE INIT ---------------------- #
+
+@app.before_first_request
+def initialize_database():
+    """Create all database tables."""
+    with app.app_context():
+        db.create_all()
+
+# ------------------------ DAILY USAGE TRACKING ------------------------ #
+
+@app.before_request
+def track_daily_usage():
+    """Track the number of daily prompts for all users."""
+    # Get today's date
+    today = date.today()
+
+    # Check if there is an entry for today's usage
+    daily_usage = DailyUsage.query.filter_by(date=today).first()
+
+    if not daily_usage:
+        # If no entry, create a new one
+        daily_usage = DailyUsage(date=today, usage_count=0)
+        db.session.add(daily_usage)
+
+    # Increment usage count
+    daily_usage.usage_count += 1
     db.session.commit()
 
-    try:
-        # Check the daily limit of prompts
-        usage = get_prompt_count()
-        if usage.count >= MAX_PROMPTS:
-            app.logger.warning('Daily prompt limit reached')
-            return jsonify({"error": "You've reached the maximum number of prompts for today. Please try again tomorrow."}), 429
-
-        # Try getting trends from cache, if available
-        cached_trends = cache.get(query)
-        if cached_trends:
-            app.logger.info(f"Cache hit for query: {query}")
-            return jsonify({"response": cached_trends})
-
-        # Get trends from external APIs
-        trends = await get_all_trends(query)
-
-        # Formulate structured prompt for ChatGPT
-        chatgpt_prompt = f"""
-        Summarize these trends for the user related to {query}. Provide brief descriptions for each and format the result clearly with links:
-        {trends}
-        """
-
-        # Get response from ChatGPT
-        chatgpt_response = await get_chatgpt_response(chatgpt_prompt)
-
-        # Cache the result for future queries
-        cache.set(query, chatgpt_response)
-
-        # Update daily usage count
-        usage.count += 1
-        db.session.commit()
-
-        app.logger.info(f"Trends retrieved successfully for query: {query}")
-        return jsonify({"response": chatgpt_response})
-    except Exception as e:
-        app.logger.error(f"Error processing trends for query: {query}: {str(e)}")
-        return jsonify({"error": "Something went wrong while retrieving trends. Please try again later."}), 500
-
-@app.route('/categories')
-def get_categories():
-    try:
-        # Cache categories to reduce database load
-        categories = cache.get("categories")
-        if not categories:
-            categories = db.session.query(Trend.category).distinct().all()
-            cache.set("categories", categories)
-        app.logger.info('Categories retrieved successfully')
-        return jsonify({"categories": [category[0] for category in categories]})
-    except Exception as e:
-        app.logger.error(f"Error retrieving categories: {str(e)}")
-        return jsonify({"error": "Failed to retrieve categories. Please try again later."}), 500
-
-# Error handling for 404 and 500 errors
-@app.errorhandler(404)
-def resource_not_found(e):
-    app.logger.error(f"Resource not found: {str(e)}")
-    return jsonify(error="The requested resource could not be found."), 404
-
-@app.errorhandler(500)
-def internal_server_error(e):
-    app.logger.error(f"Internal server error: {str(e)}")
-    return jsonify(error="Internal server error. Please try again later."), 500
-
-@app.errorhandler(Exception)
-def handle_generic_error(e):
-    app.logger.error(f"An unexpected error occurred: {str(e)}")
-    return jsonify(error="An unexpected error occurred. Please try again later."), 500
-
-# Request logging
-@app.before_request
-def log_request_info():
-    app.logger.info(f"Request: {request.method} {request.path}")
+# ------------------------- RUN APP ------------------------- #
 
 if __name__ == '__main__':
-    # Production-ready server should use Gunicorn or similar WSGI server
-    with app.app_context():
-        app.logger.info("Creating all tables if they don't exist.")
-        db.create_all()
-    
-    # For development only. In production, use Gunicorn or similar.
-    # app.run(debug=False, host='0.0.0.0')
+    app.run(debug=True)
