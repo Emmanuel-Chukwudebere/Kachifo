@@ -55,7 +55,7 @@ requests
 rsa
 sniffio
 SQLAlchemy
-TensorFlow
+TensorRT
 tensorflow
 torch
 torchaudio
