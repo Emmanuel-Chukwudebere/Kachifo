@@ -1,147 +1,99 @@
-import os
-import logging
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, request, jsonify, g
 from flask_sqlalchemy import SQLAlchemy
-from api_integrations import get_all_trends, get_chatgpt_response, cache
-from models import db, Trend, UserQuery, DailyUsage
-from datetime import date
-from dotenv import load_dotenv
-import asyncio
+from transformers import pipeline
+from functools import wraps
+import logging
+import os
+import time
+import re
 
-# Load environment variables
-load_dotenv()
-
-# Initialize the Flask app
+# Initialize Flask app and database
 app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+db = SQLAlchemy(app)
 
-# Load configuration from environment variables
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    'DATABASE_URL', 'mysql+pymysql://ceo:CEOKachifo2024@kachifo.cteuykcg0zmb.eu-north-1.rds.amazonaws.com:3306/kachifo'
-)
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['CACHE_TYPE'] = 'simple'
+# Initialize logging
+logging.basicConfig(filename='Kachifo.log', level=logging.INFO,
+                    format='%(asctime)s %(levelname)s %(message)s')
 
-# Initialize the database and cache
-db.init_app(app)
-cache.init_app(app)
+# Initialize the Hugging Face transformers model (text generation)
+model = pipeline('text-generation', model='gpt2')
 
-# Set up logging for production
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+# Rate limit setup (70 requests/day globally)
+LIMIT = 70
+RATE_LIMIT_RESET = 24 * 60 * 60  # Reset after 24 hours
+rate_limit_cache = {}
 
-# ---------------------------- ROUTES ---------------------------- #
+def rate_limiter():
+    """Decorator to rate limit users based on their IP"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            user_ip = request.remote_addr
+            current_time = time.time()
 
+            if user_ip in rate_limit_cache:
+                requests_made, first_request_time = rate_limit_cache[user_ip]
+                
+                if requests_made >= LIMIT:
+                    if current_time - first_request_time < RATE_LIMIT_RESET:
+                        return jsonify({"error": "Rate limit exceeded. Please wait before making more requests."}), 429
+                    else:
+                        # Reset the count after 24 hours
+                        rate_limit_cache[user_ip] = (0, current_time)
+
+            # Update rate limit cache
+            if user_ip not in rate_limit_cache:
+                rate_limit_cache[user_ip] = (1, current_time)
+            else:
+                rate_limit_cache[user_ip] = (rate_limit_cache[user_ip][0] + 1, first_request_time)
+            
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+def sanitize_input(input_data):
+    """Sanitize input to prevent injection and other vulnerabilities."""
+    return re.sub(r'[^\w\s]', '', input_data)
+
+# Routes
 @app.route('/')
 def home():
-    """Render the homepage."""
-    return render_template('index.html')
+    return "Welcome to Kachifo - Discover Trends."
 
-@app.route('/search', methods=['POST'])
-def search():
-    """Search for trends based on user input."""
-    query = request.form.get('query')
-    
+@app.route('/search', methods=['GET'])
+@rate_limiter()
+def search_trend():
+    query = request.args.get('q')
     if not query:
-        return jsonify({'error': 'Query is required'}), 400
-
-    # Universal prompt limit check
-    today = date.today()
-    daily_usage = DailyUsage.query.filter_by(date=today).first()
+        return jsonify({"error": "Query parameter 'q' is required."}), 400
     
-    if daily_usage and daily_usage.usage_count >= 70:
-        return jsonify({'error': 'Daily limit of 70 prompts reached. Try again tomorrow.'}), 403
+    sanitized_query = sanitize_input(query)
+    
+    # Call external API integrations (YouTube, Reddit, etc.) with sanitized query
+    result = fetch_trends_from_apis(sanitized_query)
+    
+    if result is None:
+        logging.error(f"Error fetching trends for query: {sanitized_query}")
+        return jsonify({"error": "Failed to fetch trends. Please try again."}), 500
+    
+    return jsonify({"data": result})
 
-    # Try to retrieve cached result
-    cached_result = cache.get(query.lower())
-    if cached_result:
-        return jsonify({'result': cached_result})
+@app.route('/generate', methods=['POST'])
+@rate_limiter()
+def generate_text():
+    input_data = request.json.get('input')
+    if not input_data:
+        return jsonify({"error": "Input text is required."}), 400
 
-    # Log the user query to the database
+    sanitized_input = sanitize_input(input_data)
+
     try:
-        user_query = UserQuery(query=query.lower())
-        db.session.add(user_query)
-        db.session.commit()
+        output = model(sanitized_input, max_length=50, num_return_sequences=1)
+        return jsonify({"generated_text": output[0]['generated_text']})
     except Exception as e:
-        db.session.rollback()
-        logging.error(f"Database error: {str(e)}")
-
-    # Fetch trends asynchronously
-    try:
-        trends = asyncio.run(get_all_trends(query))
-        # Cache the result for future queries
-        cache.set(query.lower(), trends)
-    except Exception as e:
-        logging.error(f"Error fetching trends: {str(e)}")
-        trends = "Sorry, we couldn't fetch trends at this time."
-
-    return jsonify({'result': trends})
-
-@app.route('/chat', methods=['POST'])
-async def chat():
-    """Get response from ChatGPT based on the user's prompt."""
-    prompt = request.form.get('prompt')
-    
-    if not prompt:
-        return jsonify({'error': 'Prompt is required'}), 400
-
-    # Universal prompt limit check
-    today = date.today()
-    daily_usage = DailyUsage.query.filter_by(date=today).first()
-    
-    if daily_usage and daily_usage.usage_count >= 70:
-        return jsonify({'error': 'Daily limit of 70 prompts reached. Try again tomorrow.'}), 403
-
-    # Fetch the ChatGPT response asynchronously
-    response = await get_chatgpt_response(prompt)
-    return jsonify({'response': response})
-
-@app.route('/categories', methods=['GET'])
-def categories():
-    """Return available categories for trends (this route can be customized further)."""
-    categories = ["Tech", "Design", "Software", "Medicine", "Finance"]
-    return jsonify({'categories': categories})
-
-@app.route('/trend_details/<int:trend_id>', methods=['GET'])
-def trend_details(trend_id):
-    """Fetch details of a specific trend by ID."""
-    trend = Trend.query.get(trend_id)
-    if trend:
-        return jsonify({
-            'id': trend.id,
-            'name': trend.name,
-            'description': trend.description,
-            'source': trend.source
-        })
-    return jsonify({'error': 'Trend not found'}), 404
-
-# ---------------------- DATABASE INIT ---------------------- #
-
-@app.before_first_request
-def initialize_database():
-    """Create all database tables."""
-    with app.app_context():
-        db.create_all()
-
-# ------------------------ DAILY USAGE TRACKING ------------------------ #
-
-@app.before_request
-def track_daily_usage():
-    """Track the number of daily prompts for all users."""
-    # Get today's date
-    today = date.today()
-
-    # Check if there is an entry for today's usage
-    daily_usage = DailyUsage.query.filter_by(date=today).first()
-
-    if not daily_usage:
-        # If no entry, create a new one
-        daily_usage = DailyUsage(date=today, usage_count=0)
-        db.session.add(daily_usage)
-
-    # Increment usage count
-    daily_usage.usage_count += 1
-    db.session.commit()
-
-# ------------------------- RUN APP ------------------------- #
+        logging.error(f"Error generating text: {str(e)}")
+        return jsonify({"error": "Failed to generate text."}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)  # Ensure debug=False in production
