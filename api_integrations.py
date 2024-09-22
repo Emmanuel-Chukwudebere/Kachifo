@@ -11,7 +11,7 @@ logging.basicConfig(filename="Kachifo.log", level=logging.INFO, format="%(asctim
 
 # Initialize Hugging Face summarization and text generation pipelines
 hugging_face_summarizer = pipeline('summarization')
-hugging_face_generator = pipeline('text-generation', model='gpt2')
+hugging_face_generator = pipeline('text-generation', model='gpt2', framework="pt") #uses PyTorch
 
 # API keys from environment variables
 YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
