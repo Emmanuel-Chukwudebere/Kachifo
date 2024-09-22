@@ -35,7 +35,6 @@ Jinja2==3.1.4
 jiter==0.5.0
 MarkupSafe==2.1.5
 openai==1.46.1
-OpenAI
 pip
 praw==7.7.1
 prawcore==2.4.0
