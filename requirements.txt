@@ -57,6 +57,7 @@ rsa
 sniffio
 SQLAlchemy
 TensorFlow
+torch
 transformers
 tqdm
 tweepy
