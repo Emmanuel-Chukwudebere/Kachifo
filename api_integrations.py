@@ -51,9 +51,8 @@ async def get_chatgpt_response(prompt):
             temperature=0.7
         )
         return response.choices[0].text.strip()
-    # Replace with general exception handling instead of specific `openai.error`
     except Exception as e:
-        logger.error(f"OpenAI API error: {e}")
+        logger.error(f"OpenAI API error: {str(e)}")  # Log the complete error
         return "Sorry, I couldn't generate a response at this time."
 
 async def get_news_trends(session, query):
@@ -131,7 +130,7 @@ def get_google_trends(query):
         pytrends = TrendReq()
         pytrends.build_payload([query], cat=0, timeframe='today 12-m', geo='', gprop='')
         related_queries = pytrends.related_queries()
-        
+
         if query in related_queries and 'top' in related_queries[query] and related_queries[query]['top'] is not None:
             top_related = related_queries[query]['top']
             if top_related.empty:
@@ -139,6 +138,7 @@ def get_google_trends(query):
                 return ["No Google trends found for this query."]
             return [f"{row['query']}" for index, row in top_related.iterrows()]
         else:
+            logger.warning(f"No top related Google trends found for query: {query}")
             return ["No Google trends found for this query."]
     except Exception as e:
         logger.error(f"Error fetching Google trends: {e}")
