@@ -59,7 +59,6 @@ SQLAlchemy
 TensorFlow
 tensorflow
 torch
-torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 torchaudio
 torchvision
 transformers
