@@ -51,7 +51,6 @@ pyparsing
 python-dotenv
 pytrends
 ratelimit
-re
 requests
 rsa
 sniffio
