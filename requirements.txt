@@ -36,7 +36,6 @@ itsdangerous
 Jinja2
 jiter
 MarkupSafe
-openai
 praw
 prawcore
 proto-plus
