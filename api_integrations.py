@@ -4,7 +4,7 @@ import logging
 from functools import wraps
 import time
 import aiohttp
-import openai
+from openai import OpenAI
 from flask_caching import Cache
 from pytrends.request import TrendReq
 
@@ -44,12 +44,12 @@ def rate_limited(max_calls, time_frame):
 @rate_limited(max_calls=5, time_frame=60)
 async def get_chatgpt_response(prompt):
     try:
-        response = await openai.Completion.acreate(
-            engine="text-davinci-003",
-            prompt=prompt,
-            max_tokens=250,
-            temperature=0.7
-        )
+        response = await openai.ChatCompletion.acreate(
+    model="gpt-4o-mini",  # You can also use "gpt-4" if available
+    messages=[{"role": "user", "content": prompt}],
+    max_tokens=250,
+    temperature=0.7
+)
         return response.choices[0].text.strip()
     except Exception as e:
         logger.error(f"OpenAI API error: {str(e)}")  # Log the complete error
