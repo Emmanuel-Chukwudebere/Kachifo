@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Initialize cache
 cache = Cache(config={'CACHE_TYPE': 'simple'})
 
-# Load API keys from environment variables
+# Environment variables for API keys (validate API keys are provided)
 NEWS_API_KEY = os.getenv('NEWS_API_KEY')
 REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID')
 REDDIT_SECRET = os.getenv('REDDIT_SECRET')
@@ -24,11 +24,12 @@ YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
 TWITTER_BEARER_TOKEN = os.getenv('TWITTER_BEARER_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-# Initialize OpenAI key
+if not all([NEWS_API_KEY, REDDIT_CLIENT_ID, REDDIT_SECRET, YOUTUBE_API_KEY, TWITTER_BEARER_TOKEN, OPENAI_API_KEY]):
+    raise Exception("Missing API keys, ensure all required API keys are set")
+
 openai.api_key = OPENAI_API_KEY
 
-
-# Rate-limiting decorator
+# Rate limiting decorator
 def rate_limited(max_calls, time_frame):
     def decorator(func):
         calls = []
@@ -43,94 +44,74 @@ def rate_limited(max_calls, time_frame):
         return wrapper
     return decorator
 
-
 @rate_limited(max_calls=5, time_frame=60)
 async def get_chatgpt_response(prompt):
     try:
         response = await openai.ChatCompletion.acreate(
-            model="gpt-3.5-turbo",
+            model="gpt-3.5-turbo",  # "gpt-4" if available
             messages=[{"role": "user", "content": prompt}],
             max_tokens=250,
             temperature=0.7
         )
-        return response.choices[0].message['content'].strip()
+        return response.choices[0].message['content'].strip()  # Update based on ChatCompletion return
     except Exception as e:
         logger.error(f"OpenAI API error: {str(e)}")
         return "Sorry, I couldn't generate a response at this time."
 
+async def fetch_api(session, url, params=None, headers=None):
+    try:
+        async with session.get(url, params=params, headers=headers) as response:
+            if response.status == 200:
+                return await response.json()
+            logger.warning(f"API returned non-200 status code: {response.status}")
+            return None
+    except Exception as e:
+        logger.error(f"Error fetching data from {url}: {e}")
+        return None
 
 async def get_news_trends(session, query):
-    try:
-        url = f'https://newsapi.org/v2/everything?q={query}&apiKey={NEWS_API_KEY}'
-        async with session.get(url) as response:
-            if response.status == 200:
-                data = await response.json()
-                articles = data.get('articles', [])
-                return [f"{article['title']} - {article['url']}" for article in articles[:5]]
-            else:
-                logger.warning(f"News API returned status code {response.status}")
-                return ["No news trends found."]
-    except Exception as e:
-        logger.error(f"Error fetching news trends: {e}")
-        return ["Error fetching news trends."]
-
+    url = f'https://newsapi.org/v2/everything'
+    params = {'q': query, 'apiKey': NEWS_API_KEY}
+    data = await fetch_api(session, url, params)
+    if data:
+        articles = data.get('articles', [])
+        return [f"{article['title']} - {article['url']}" for article in articles[:5]]
+    return ["No news trends found."]
 
 async def get_reddit_trends(session, query):
-    try:
-        headers = {"User-Agent": REDDIT_USER_AGENT}
-        auth = aiohttp.BasicAuth(REDDIT_CLIENT_ID, REDDIT_SECRET)
-        data = {'grant_type': 'client_credentials'}
-        async with session.post('https://www.reddit.com/api/v1/access_token', auth=auth, data=data, headers=headers) as token_response:
-            if token_response.status == 200:
-                token_data = await token_response.json()
-                access_token = token_data['access_token']
-                headers['Authorization'] = f'bearer {access_token}'
-                search_url = f"https://oauth.reddit.com/search?q={query}&sort=top&limit=5"
-                async with session.get(search_url, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        posts = data['data']['children']
-                        return [f"{post['data']['title']} - {post['data']['url']}" for post in posts]
-            else:
-                logger.warning(f"Reddit API returned status code {token_response.status}")
-        return ["No Reddit trends found."]
-    except Exception as e:
-        logger.error(f"Error fetching Reddit trends: {e}")
-        return ["Error fetching Reddit trends."]
-
+    url = 'https://www.reddit.com/api/v1/access_token'
+    headers = {"User-Agent": REDDIT_USER_AGENT}
+    auth = aiohttp.BasicAuth(REDDIT_CLIENT_ID, REDDIT_SECRET)
+    data = {'grant_type': 'client_credentials'}
+    token_response = await fetch_api(session, url, data=data, headers=headers)
+    if token_response:
+        access_token = token_response['access_token']
+        headers['Authorization'] = f'bearer {access_token}'
+        search_url = f"https://oauth.reddit.com/search?q={query}&sort=top&limit=5"
+        data = await fetch_api(session, search_url, headers=headers)
+        if data:
+            posts = data['data']['children']
+            return [f"{post['data']['title']} - {post['data']['url']}" for post in posts]
+    return ["No Reddit trends found."]
 
 async def get_youtube_trends(session, query):
-    try:
-        url = f'https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&key={YOUTUBE_API_KEY}&maxResults=5'
-        async with session.get(url) as response:
-            if response.status == 200:
-                data = await response.json()
-                videos = data.get('items', [])
-                return [f"{video['snippet']['title']} - https://www.youtube.com/watch?v={video['id']['videoId']}" for video in videos]
-            else:
-                logger.warning(f"YouTube API returned status code {response.status}")
-                return ["No YouTube trends found."]
-    except Exception as e:
-        logger.error(f"Error fetching YouTube trends: {e}")
-        return ["Error fetching YouTube trends."]
-
+    url = 'https://www.googleapis.com/youtube/v3/search'
+    params = {'part': 'snippet', 'q': query, 'key': YOUTUBE_API_KEY, 'maxResults': 5}
+    data = await fetch_api(session, url, params)
+    if data:
+        videos = data.get('items', [])
+        return [f"{video['snippet']['title']} - https://www.youtube.com/watch?v={video['id']['videoId']}" for video in videos]
+    return ["No YouTube trends found."]
 
 async def get_twitter_trends(session, query):
-    try:
-        headers = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
-        url = f"https://api.twitter.com/2/tweets/search/recent?query={query}&tweet.fields=created_at&max_results=5"
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                data = await response.json()
-                tweets = data.get('data', [])
-                return [f"{tweet['text']} - Tweet ID: {tweet['id']}" for tweet in tweets]
-            else:
-                logger.warning(f"Twitter API returned status code {response.status}")
-                return ["No Twitter trends found."]
-    except Exception as e:
-        logger.error(f"Error fetching Twitter trends: {e}")
-        return ["Error fetching Twitter trends."]
-
+    url = f"https://api.twitter.com/2/tweets/search/recent"
+    headers = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
+    params = {'query': query, 'tweet.fields': 'created_at', 'max_results': 5}
+    data = await fetch_api(session, url, params=params, headers=headers)
+    if data:
+        tweets = data['data']
+        return [f"{tweet['text']} - Tweet ID: {tweet['id']}" for tweet in tweets]
+    return ["No Twitter trends found."]
 
 @cache.memoize(timeout=3600)
 def get_google_trends(query):
@@ -141,17 +122,11 @@ def get_google_trends(query):
 
         if query in related_queries and 'top' in related_queries[query] and related_queries[query]['top'] is not None:
             top_related = related_queries[query]['top']
-            if top_related.empty:
-                logger.warning(f"No Google trends found for query: {query}")
-                return ["No Google trends found for this query."]
-            return [f"{row['query']}" for index, row in top_related.iterrows()]
-        else:
-            logger.warning(f"No top related Google trends found for query: {query}")
-            return ["No Google trends found for this query."]
+            return [f"{row['query']}" for index, row in top_related.iterrows()] if not top_related.empty else ["No Google trends found."]
+        return ["No Google trends found for this query."]
     except Exception as e:
         logger.error(f"Error fetching Google trends: {e}")
         return ["Error fetching Google trends."]
-
 
 async def get_all_trends(query):
     async with aiohttp.ClientSession() as session:
@@ -172,9 +147,10 @@ async def get_all_trends(query):
         'google': google_trends,
     }
 
-    formatted_trends = "\n".join(
-        f"{category.capitalize()} trends:\n" + "\n".join(f"- {trend}" for trend in trend_list) 
-        for category, trend_list in trends.items()
-    )
-    
+    formatted_trends = ""
+    for category, trend_list in trends.items():
+        formatted_trends += f"\n{category.capitalize()} trends:\n"
+        for trend in trend_list:
+            formatted_trends += f"- {trend}\n"
+
     return formatted_trends
