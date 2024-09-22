@@ -17,7 +17,7 @@ logging.basicConfig(filename='Kachifo.log', level=logging.INFO,
                     format='%(asctime)s %(levelname)s %(message)s')
 
 # Initialize the Hugging Face transformers model (text generation)
-model = pipeline('text-generation', model='gpt2')
+model = pipeline('text-generation', model='gpt2', framework="PyTorch")
 
 # Rate limit setup (70 requests/day globally)
 LIMIT = 70
@@ -96,4 +96,5 @@ def generate_text():
         return jsonify({"error": "Failed to generate text."}), 500
 
 if __name__ == '__main__':
-    app.run(debug=False)  # Ensure debug=False in production
+    port = int(os.environ.get("PORT", 5000))  # Default to port 5000 if PORT is not set
+    app.run(host="0.0.0.0", port=port)  # Ensure debug=False in production
