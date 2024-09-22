@@ -4,7 +4,7 @@ import logging
 from functools import wraps
 import time
 import aiohttp
-from openai import OpenAI
+import openai
 from flask_caching import Cache
 from pytrends.request import TrendReq
 
