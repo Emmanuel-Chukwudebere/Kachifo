@@ -18,6 +18,7 @@ Flask[async]
 Flask-Caching
 Flask-Cors
 Flask-SQLAlchemy
+Flax
 google-api-core
 google-api-python-client
 google-auth
@@ -36,7 +37,7 @@ Jinja2
 jiter
 MarkupSafe
 openai
-pip
+--upgrade pip
 praw
 prawcore
 proto-plus
@@ -57,7 +58,11 @@ rsa
 sniffio
 SQLAlchemy
 TensorFlow
+tensorflow
 torch
+torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+torchaudio
+torchvision
 transformers
 tqdm
 tweepy
