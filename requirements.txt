@@ -47,7 +47,6 @@ pycparser
 pydantic
 pydantic_core
 PyMySQL
-PyTorch
 pyparsing
 python-dotenv
 pytrends
