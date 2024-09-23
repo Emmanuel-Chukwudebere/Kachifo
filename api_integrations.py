@@ -11,7 +11,14 @@ import spacy
 logging.basicConfig(filename="Kachifo.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Initialize SpaCy NLP model
-nlp = spacy.load("en_core_web_sm")
+try:
+    # Load the language model
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    # If the model is not installed, install it programmatically
+    from spacy.cli import download
+    download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
 
 # Cache setup: 1 hour time-to-live, max 1000 items
 cache = TTLCache(maxsize=1000, ttl=3600)
