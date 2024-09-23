@@ -27,7 +27,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:/
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Caching configuration
-app.config['CACHE_TYPE'] = 'redis' if os.environ.get('REDIS_URL') else 'simple'  # Use Redis in production for better performance
+app.config['CACHE_TYPE'] = 'simple'  # Use Redis in production for better performance
 app.config['CACHE_DEFAULT_TIMEOUT'] = 3600  # 1 hour
 cache = Cache(app)
 
