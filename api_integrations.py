@@ -15,23 +15,6 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-# Configure logging
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.ERROR)  # You can adjust the level to INFO, ERROR, etc.
-
-# Create handlers
-console_handler = logging.StreamHandler(sys.stdout)
-file_handler = logging.FileHandler('Kachifo.log')
-
-# Set log format
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(formatter)
-file_handler.setFormatter(formatter)
-
-# Add handlers to logger
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
-
 # Initialize SpaCy NLP model
 try:
     nlp = spacy.load("en_core_web_sm")
@@ -243,4 +226,4 @@ def fetch_trending_topics(query):
     }
 
     logging.info(f"Fetched combined results for query: {query}")
-    return combined_results8
+    return combined_results
