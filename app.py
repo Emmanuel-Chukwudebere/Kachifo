@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, render_template, g
 from flask_sqlalchemy import SQLAlchemy
-from transformers import pipeline
+from transformers import pipeline, logging as hf_logging
 from flask_caching import Cache
 from flask_talisman import Talisman
 from functools import wraps
@@ -10,37 +10,50 @@ import time
 import re
 from api_integrations import fetch_trends_from_apis  # Import API integration logic
 from werkzeug.exceptions import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
+
+# Disable unnecessary transformers logging in production
+hf_logging.set_verbosity_error()
 
 # Initialize Flask app
 app = Flask(__name__)
 
 # Security: Use Flask-Talisman to enforce HTTPS, set secure headers (Content Security Policy)
-talisman = Talisman(app)
+Talisman(app, content_security_policy={
+    'default-src': ['\'self\'', 'https:'],
+    'script-src': ['\'self\'', 'https:'],
+    'style-src': ['\'self\'', 'https:']
+})
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///default.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///default.db')  # Ensure environment variable is set for production
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Caching configuration
-app.config['CACHE_TYPE'] = 'simple'  # Can be upgraded to 'redis' or other caching backends in production
+app.config['CACHE_TYPE'] = 'redis' if os.environ.get('REDIS_URL') else 'simple'  # Use Redis in production for better performance
+app.config['CACHE_DEFAULT_TIMEOUT'] = 3600  # 1 hour
 cache = Cache(app)
 
 # Initialize database
 db = SQLAlchemy(app)
 
 # Initialize logging
-logging.basicConfig(
-    filename='Kachifo.log',
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s [%(remote_addr)s] %(message)s'
-)
+if not app.debug:
+    logging.basicConfig(
+        filename='Kachifo.log',
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s [%(remote_addr)s] %(message)s'
+    )
 
-# Lazy model loading for better resource usage in production
+# Model loading: Lazy initialization for HuggingFace model to save memory
 huggingface_model = None
+
 def load_huggingface_model():
+    """Load and cache the HuggingFace model for text generation."""
     global huggingface_model
     if huggingface_model is None:
-        huggingface_model = pipeline('text-generation', model='distilgpt2', framework="pt")
+        # Efficient model loading with small model to save memory
+        huggingface_model = pipeline('text-generation', model='distilgpt2', framework='pt')
     return huggingface_model
 
 # Rate limit setup (70 requests/day per IP)
@@ -162,9 +175,12 @@ def generate_text():
 @app.teardown_appcontext
 def shutdown_session(exception=None):
     """Ensure the database session is properly closed after each request."""
-    db.session.remove()
+    try:
+        db.session.remove()
+    except SQLAlchemyError as e:
+        logging.error(f"Error closing database session: {str(e)}")
 
 # Run the app in production (Gunicorn will handle this in a proper setup)
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))  # Default to port 5000 if PORT is not set
-    app.run(host="0.0.0.0", port=port)  # Ensure debug=False in production
+    app.run(host="0.0.0.0", port=port)
