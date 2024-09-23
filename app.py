@@ -8,7 +8,7 @@ import logging
 import os
 import time
 import re
-from api_integrations import fetch_trends_from_apis  # Import API integration logic
+from api_integrations import fetch_trending_topics  # Import API integration logic
 from werkzeug.exceptions import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -136,7 +136,7 @@ def search_trend():
     
     # Fetch trends from external APIs
     try:
-        result = fetch_trends_from_apis(sanitized_query)
+        result = fetch_trending_topics (sanitized_query)
         if not result:
             logging.error(f"No trends found for query: {sanitized_query}")
             return jsonify({"error": "No trends found."}), 404
