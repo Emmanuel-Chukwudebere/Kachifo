@@ -40,7 +40,7 @@ huggingface_model = None
 def load_huggingface_model():
     global huggingface_model
     if huggingface_model is None:
-        huggingface_model = pipeline('text-generation', model='gpt2', framework="pt")
+        huggingface_model = pipeline('text-generation', model='distilgpt2', framework="pt")
     return huggingface_model
 
 # Rate limit setup (70 requests/day per IP)
