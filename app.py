@@ -27,144 +27,116 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:/
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Caching configuration - Switch between 'redis' and 'simple' based on environment
-if os.environ.get('USE_REDIS', 'False') == 'True':
-    app.config['CACHE_TYPE'] = 'redis'
-    app.config['CACHE_REDIS_URL'] = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+if os.environ.get('REDIS_URL'):
+    app.config['CACHE_TYPE'] = 'RedisCache'
+    app.config['CACHE_REDIS_URL'] = os.environ['REDIS_URL']
 else:
-    app.config['CACHE_TYPE'] = 'simple'  # Use simple in development
+    app.config['CACHE_TYPE'] = 'SimpleCache'
 
 cache = Cache(app)
-
-# Initialize database
 db = SQLAlchemy(app)
 
-# Initialize logging
-if not app.debug:
-    logging.basicConfig(
-        filename='Kachifo.log',
-        level=logging.INFO,
-        format='%(asctime)s %(levelname)s [%(remote_addr)s] %(message)s'
-    )
-    logger = logging.getLogger()
+# Advanced logging setup: Logs to file and console (stdout) for Render
+LOG_FILE = "Kachifo.log"
+logging.basicConfig(
+    level=logging.DEBUG,  # Capture everything (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),       # Log to file
+        logging.StreamHandler()              # Log to Render's stdout (console)
+    ]
+)
 
-# Load SpaCy model
-nlp = spacy.load("en_core_web_sm")  # Small model to save memory
+# Helper function to log request details
+def log_request_details():
+    logging.info(f"Request Method: {request.method}")
+    logging.info(f"Request URL: {request.url}")
+    logging.info(f"Request Headers: {request.headers}")
+    if request.method == 'POST':
+        logging.info(f"Request Body: {request.get_json()}")
 
-# Rate limit setup (70 requests/day per IP)
-LIMIT = 70
-RATE_LIMIT_RESET = 24 * 60 * 60  # Reset after 24 hours
-rate_limit_cache = {}
+# Simple rate-limiting decorator (e.g., 50 requests per day per user)
+def rate_limit(func):
+    """Decorator to limit number of API calls."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        user_ip = request.remote_addr
+        key = f"rate_limit_{user_ip}"
+        remaining_requests = cache.get(key)
+        
+        if remaining_requests is None:
+            remaining_requests = 50
+        elif remaining_requests <= 0:
+            logging.warning(f"Rate limit exceeded for IP: {user_ip}")
+            return jsonify({'error': 'Rate limit exceeded. Please try again tomorrow.'}), 429
 
-def rate_limiter():
-    """Decorator to rate limit users based on their IP address."""
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            user_ip = request.remote_addr
-            current_time = time.time()
+        cache.set(key, remaining_requests - 1, timeout=24 * 3600)
+        logging.info(f"Remaining requests for {user_ip}: {remaining_requests - 1}")
+        return func(*args, **kwargs)
 
-            if user_ip in rate_limit_cache:
-                requests_made, first_request_time = rate_limit_cache[user_ip]
+    return wrapper
 
-                if requests_made >= LIMIT:
-                    if current_time - first_request_time < RATE_LIMIT_RESET:
-                        logger.warning(f"Rate limit exceeded for IP: {user_ip}")
-                        return jsonify({"error": "Rate limit exceeded. Please wait before making more requests."}), 429
-                    else:
-                        # Reset the count after 24 hours
-                        rate_limit_cache[user_ip] = (0, current_time)
-
-            # Update rate limit cache
-            if user_ip not in rate_limit_cache:
-                rate_limit_cache[user_ip] = (1, current_time)
-            else:
-                rate_limit_cache[user_ip] = (rate_limit_cache[user_ip][0] + 1, rate_limit_cache[user_ip][1])
-
-            return f(*args, **kwargs)
-        return decorated_function
-    return decorator
-
-def sanitize_input(input_data):
+# Sanitize input helper
+def sanitize_input(query):
     """Sanitize input to prevent injection attacks."""
-    sanitized = re.sub(r'[^\w\s]', '', input_data)
-    logger.info(f"Sanitized input: {sanitized}")
+    sanitized = re.sub(r"[^\w\s]", "", query).strip()
+    logging.info(f"Sanitized input: {sanitized}")
     return sanitized
 
-# SpaCy NLP processing function
-def analyze_text(text):
-    """Process text input using SpaCy for named entity recognition and keyword extraction."""
-    doc = nlp(text)
-    entities = [(ent.text, ent.label_) for ent in doc.ents]  # Extract entities
-    tokens = [token.text for token in doc if token.is_alpha and not token.is_stop]  # Filter keywords
-    return {
-        "entities": entities,
-        "keywords": tokens
-    }
-
-# Error handling
+# Error handling for user-friendly responses
 @app.errorhandler(HTTPException)
-def handle_http_exception(e):
-    """Handle general HTTP exceptions."""
-    logger.error(f"HTTP error: {e.description}")
-    return jsonify({"error": e.description}), e.code
+def handle_http_error(e):
+    """Return user-friendly error messages."""
+    logging.error(f"HTTP error occurred: {e.description} - Code: {e.code}")
+    return jsonify({'error': e.description}), e.code
 
-@app.errorhandler(500)
-def internal_server_error(error):
-    """Handle internal server errors."""
-    logger.error(f"Internal server error: {str(error)}")
-    return jsonify({"error": "An internal error occurred. Please try again later."}), 500
+@app.errorhandler(SQLAlchemyError)
+def handle_database_error(e):
+    """Handle database errors gracefully."""
+    logging.error(f"Database error: {str(e)}")
+    return jsonify({'error': 'A database error occurred. Please try again later.'}), 500
 
-# Centralized 404 handler for unknown routes
-@app.errorhandler(404)
-def not_found_error(error):
-    """Handle 404 errors."""
-    logger.warning(f"404 error: {request.url} not found")
-    return jsonify({"error": "Endpoint not found."}), 404
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    """Handle unexpected errors gracefully."""
+    logging.critical(f"Unexpected error: {str(e)}")
+    return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
 
-# Route: Home
+# Routes
 @app.route('/')
 def home():
-    """Render the homepage."""
-    return render_template('index.html')  # Ensure index.html is in your templates folder
+    """Home route."""
+    logging.info("Home page accessed")
+    return render_template('index.html', message="Welcome to Kachifo - Discover trends")
 
-# Route: Search trends
-@app.route('/search', methods=['GET'])
-@rate_limiter()
-@cache.cached(timeout=60 * 60, query_string=True)  # Cache for 1 hour based on query string
-def search_trend():
-    """Search for trends based on user query."""
-    query = request.args.get('q')
+@app.route('/search', methods=['GET', 'POST'])
+@rate_limit
+def search_trends():
+    """Search for trending topics based on user input using both GET and POST."""
+    log_request_details()  # Log request details for better traceability
+    
+    if request.method == 'GET':
+        query = request.args.get('q', '')
+    elif request.method == 'POST':
+        data = request.get_json()
+        if not data or 'q' not in data:
+            logging.error("POST request missing 'q' in body")
+            return jsonify({'error': 'Query parameter is required in body for POST'}), 400
+        query = data['q']
+
     if not query:
-        return jsonify({"error": "Query parameter 'q' is required."}), 400
+        logging.warning("Search query is missing")
+        return jsonify({'error': 'Query parameter is required'}), 400
+
+    query = sanitize_input(query)
     
-    sanitized_query = sanitize_input(query)
-    
-    # Fetch trends from external APIs
     try:
-        result = fetch_trending_topics(sanitized_query)
-        if not result:
-            logger.error(f"No trends found for query: {sanitized_query}")
-            return jsonify({"error": "No trends found."}), 404
+        results = fetch_trending_topics(query)
+        logging.info(f"Search results for '{query}': {results}")
+        return jsonify(results)
     except Exception as e:
-        logger.error(f"Error fetching trends for query '{sanitized_query}': {str(e)}")
-        return jsonify({"error": "Failed to fetch trends. Please try again."}), 500
+        logging.error(f"Error while fetching trends: {str(e)}")
+        return jsonify({'error': 'Failed to fetch trending topics. Please try again later.'}), 500
 
-    # Analyze text using SpaCy
-    analysis = analyze_text(sanitized_query)
-
-    logger.info(f"Fetched trends and analyzed text for query: {sanitized_query}")
-    return jsonify({"data": result, "analysis": analysis})
-
-# Database session handling
-@app.teardown_appcontext
-def shutdown_session(exception=None):
-    """Ensure the database session is properly closed after each request."""
-    try:
-        db.session.remove()
-    except SQLAlchemyError as e:
-        logger.error(f"Error closing database session: {str(e)}")
-
-# Run the app in production (Gunicorn will handle this in a proper setup)
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))  # Default to port 5000 if PORT is not set
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True)
