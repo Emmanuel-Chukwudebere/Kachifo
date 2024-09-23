@@ -1,6 +1,7 @@
 import os
 import requests
 import logging
+import sys
 from requests.auth import HTTPBasicAuth
 import re
 from datetime import datetime, timedelta
@@ -8,7 +9,10 @@ from cachetools import cached, TTLCache
 import spacy
 
 # Logging setup
-logging.basicConfig(filename="Kachifo.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    stream=sys.stdout,  # Output logs to stdout instead of a file
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
 
 # Initialize SpaCy NLP model
 try:
