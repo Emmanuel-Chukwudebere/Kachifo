@@ -36,6 +36,7 @@ Jinja2
 jiter
 MarkupSafe
 numpy
+pandas
 praw
 prawcore
 proto-plus
@@ -55,6 +56,7 @@ requests
 rsa
 sniffio
 spacy
+scipy
 SQLAlchemy
 torch
 torchaudio
