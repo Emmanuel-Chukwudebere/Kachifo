@@ -26,8 +26,14 @@ Talisman(app, content_security_policy={
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///default.db')  # Ensure environment variable is set for production
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Caching configuration
-app.config['CACHE_TYPE'] = 'simple'  # Use Redis in production for better performance
+# Caching configuration - Switch between 'redis' and 'simple' based on environment
+if os.environ.get('USE_REDIS', 'False') == 'True':
+    app.config['CACHE_TYPE'] = 'redis'
+    app.config['CACHE_REDIS_URL'] = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+else:
+    app.config['CACHE_TYPE'] = 'simple'  # Use simple in development
+
+cache = Cache(app)
 
 # Initialize database
 db = SQLAlchemy(app)
@@ -39,6 +45,7 @@ if not app.debug:
         level=logging.INFO,
         format='%(asctime)s %(levelname)s [%(remote_addr)s] %(message)s'
     )
+    logger = logging.getLogger()
 
 # Load SpaCy model
 nlp = spacy.load("en_core_web_sm")  # Small model to save memory
@@ -61,7 +68,7 @@ def rate_limiter():
 
                 if requests_made >= LIMIT:
                     if current_time - first_request_time < RATE_LIMIT_RESET:
-                        logging.warning(f"Rate limit exceeded for IP: {user_ip}")
+                        logger.warning(f"Rate limit exceeded for IP: {user_ip}")
                         return jsonify({"error": "Rate limit exceeded. Please wait before making more requests."}), 429
                     else:
                         # Reset the count after 24 hours
@@ -80,7 +87,7 @@ def rate_limiter():
 def sanitize_input(input_data):
     """Sanitize input to prevent injection attacks."""
     sanitized = re.sub(r'[^\w\s]', '', input_data)
-    logging.info(f"Sanitized input: {sanitized}")
+    logger.info(f"Sanitized input: {sanitized}")
     return sanitized
 
 # SpaCy NLP processing function
@@ -98,20 +105,20 @@ def analyze_text(text):
 @app.errorhandler(HTTPException)
 def handle_http_exception(e):
     """Handle general HTTP exceptions."""
-    logging.error(f"HTTP error: {e.description}")
+    logger.error(f"HTTP error: {e.description}")
     return jsonify({"error": e.description}), e.code
 
 @app.errorhandler(500)
 def internal_server_error(error):
     """Handle internal server errors."""
-    logging.error(f"Internal server error: {str(error)}")
+    logger.error(f"Internal server error: {str(error)}")
     return jsonify({"error": "An internal error occurred. Please try again later."}), 500
 
 # Centralized 404 handler for unknown routes
 @app.errorhandler(404)
 def not_found_error(error):
     """Handle 404 errors."""
-    logging.warning(f"404 error: {request.url} not found")
+    logger.warning(f"404 error: {request.url} not found")
     return jsonify({"error": "Endpoint not found."}), 404
 
 # Route: Home
@@ -134,18 +141,18 @@ def search_trend():
     
     # Fetch trends from external APIs
     try:
-        result = fetch_trending_topics (sanitized_query)
+        result = fetch_trending_topics(sanitized_query)
         if not result:
-            logging.error(f"No trends found for query: {sanitized_query}")
+            logger.error(f"No trends found for query: {sanitized_query}")
             return jsonify({"error": "No trends found."}), 404
     except Exception as e:
-        logging.error(f"Error fetching trends for query '{sanitized_query}': {str(e)}")
+        logger.error(f"Error fetching trends for query '{sanitized_query}': {str(e)}")
         return jsonify({"error": "Failed to fetch trends. Please try again."}), 500
 
     # Analyze text using SpaCy
     analysis = analyze_text(sanitized_query)
 
-    logging.info(f"Fetched trends and analyzed text for query: {sanitized_query}")
+    logger.info(f"Fetched trends and analyzed text for query: {sanitized_query}")
     return jsonify({"data": result, "analysis": analysis})
 
 # Database session handling
@@ -155,7 +162,7 @@ def shutdown_session(exception=None):
     try:
         db.session.remove()
     except SQLAlchemyError as e:
-        logging.error(f"Error closing database session: {str(e)}")
+        logger.error(f"Error closing database session: {str(e)}")
 
 # Run the app in production (Gunicorn will handle this in a proper setup)
 if __name__ == '__main__':
