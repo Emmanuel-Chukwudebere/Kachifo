@@ -1,4 +1,4 @@
-numpy
+numpy==1.26.4
 scipy
 pandas
 spacy
@@ -55,14 +55,15 @@ pytrends
 ratelimit
 requests
 rsa
+sentry-sdk
 sniffio
 SQLAlchemy
+thinc
 torch
 torchaudio
 torchvision
 tqdm
 tweepy
-twitter
 typing_extensions
 update-checker
 uritemplate
