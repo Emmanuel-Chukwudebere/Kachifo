@@ -2,17 +2,16 @@ import os
 import requests
 import logging
 from requests.auth import HTTPBasicAuth
-from transformers import pipeline
 import re
 from datetime import datetime, timedelta
 from cachetools import cached, TTLCache
+import spacy
 
 # Logging setup
 logging.basicConfig(filename="Kachifo.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Initialize Hugging Face summarization and text generation pipelines
-hugging_face_summarizer = pipeline('summarization', model='facebook/bart-large-cnn', framework="pt")
-hugging_face_generator = pipeline('text-generation', model='distilgpt2', framework="pt")
+# Initialize SpaCy NLP model
+nlp = spacy.load("en_core_web_sm")
 
 # Cache setup: 1 hour time-to-live, max 1000 items
 cache = TTLCache(maxsize=1000, ttl=3600)
@@ -43,9 +42,20 @@ def sanitize_input(query):
 # Decorator for rate limiting (custom implementation or using a package like `ratelimit`)
 def rate_limited(func):
     def wrapper(*args, **kwargs):
-        # Add rate-limiting logic (e.g., based on time interval)
+        # Add rate-limiting logic here if needed
         return func(*args, **kwargs)
     return wrapper
+
+# Summarize text using SpaCy
+def summarize_text(text):
+    """Summarize text using SpaCy."""
+    doc = nlp(text)
+    sentences = list(doc.sents)
+    if not sentences:
+        return "No content available."
+    
+    # Simple summarization: return first sentence as summary
+    return str(sentences[0]) if sentences else "No summary available."
 
 # Fetch and cache data from Reddit
 @cached(cache)
@@ -78,7 +88,7 @@ def fetch_reddit_data(query):
             title = data.get('title', 'No title')
             url = f"https://www.reddit.com{data.get('permalink', '')}"
             body = data.get('selftext', '')
-            summary = hugging_face_summarizer(body, max_length=50, min_length=25, do_sample=False)[0]['summary_text'] if body else "No content available."
+            summary = summarize_text(body)
             
             structured_results.append({'title': title, 'url': url, 'summary': summary})
         
@@ -110,7 +120,7 @@ def fetch_twitter_data(query):
         for tweet in tweets:
             text = tweet.get('text', 'No text available')
             tweet_url = f"https://twitter.com/user/status/{tweet.get('id_str', '')}"
-            summary = hugging_face_summarizer(text, max_length=30, min_length=10, do_sample=False)[0]['summary_text']
+            summary = summarize_text(text)
             
             structured_results.append({'tweet': text, 'url': tweet_url, 'summary': summary})
         

@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify, render_template, g
 from flask_sqlalchemy import SQLAlchemy
-from transformers import pipeline, logging as hf_logging
 from flask_caching import Cache
 from flask_talisman import Talisman
 from functools import wraps
+import spacy
 import logging
 import os
 import time
@@ -11,9 +11,6 @@ import re
 from api_integrations import fetch_trends_from_apis  # Import API integration logic
 from werkzeug.exceptions import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
-
-# Disable unnecessary transformers logging in production
-hf_logging.set_verbosity_error()
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -45,16 +42,8 @@ if not app.debug:
         format='%(asctime)s %(levelname)s [%(remote_addr)s] %(message)s'
     )
 
-# Model loading: Lazy initialization for HuggingFace model to save memory
-huggingface_model = None
-
-def load_huggingface_model():
-    """Load and cache the HuggingFace model for text generation."""
-    global huggingface_model
-    if huggingface_model is None:
-        # Efficient model loading with small model to save memory
-        huggingface_model = pipeline('text-generation', model='distilgpt2', framework='pt')
-    return huggingface_model
+# Load SpaCy model
+nlp = spacy.load("en_core_web_sm")  # Small model to save memory
 
 # Rate limit setup (70 requests/day per IP)
 LIMIT = 70
@@ -96,6 +85,17 @@ def sanitize_input(input_data):
     logging.info(f"Sanitized input: {sanitized}")
     return sanitized
 
+# SpaCy NLP processing function
+def analyze_text(text):
+    """Process text input using SpaCy for named entity recognition and keyword extraction."""
+    doc = nlp(text)
+    entities = [(ent.text, ent.label_) for ent in doc.ents]  # Extract entities
+    tokens = [token.text for token in doc if token.is_alpha and not token.is_stop]  # Filter keywords
+    return {
+        "entities": entities,
+        "keywords": tokens
+    }
+
 # Error handling
 @app.errorhandler(HTTPException)
 def handle_http_exception(e):
@@ -115,11 +115,6 @@ def not_found_error(error):
     """Handle 404 errors."""
     logging.warning(f"404 error: {request.url} not found")
     return jsonify({"error": "Endpoint not found."}), 404
-
-# Lazy load model and cache it to avoid resource overuse
-@app.before_request
-def before_request():
-    g.model = load_huggingface_model()  # Lazy load and attach to request context
 
 # Route: Home
 @app.route('/')
@@ -149,27 +144,11 @@ def search_trend():
         logging.error(f"Error fetching trends for query '{sanitized_query}': {str(e)}")
         return jsonify({"error": "Failed to fetch trends. Please try again."}), 500
 
-    logging.info(f"Fetched trends for query: {sanitized_query}")
-    return jsonify({"data": result})
+    # Analyze text using SpaCy
+    analysis = analyze_text(sanitized_query)
 
-# Route: Generate text using Hugging Face model
-@app.route('/generate', methods=['POST'])
-@rate_limiter()
-def generate_text():
-    """Generate text using the Hugging Face model."""
-    input_data = request.json.get('input')
-    if not input_data:
-        return jsonify({"error": "Input text is required."}), 400
-
-    sanitized_input = sanitize_input(input_data)
-
-    try:
-        output = g.model(sanitized_input, max_length=50, num_return_sequences=1)
-        logging.info(f"Generated text for input: {sanitized_input}")
-        return jsonify({"generated_text": output[0]['generated_text']})
-    except Exception as e:
-        logging.error(f"Error generating text: {str(e)}")
-        return jsonify({"error": "Failed to generate text."}), 500
+    logging.info(f"Fetched trends and analyzed text for query: {sanitized_query}")
+    return jsonify({"data": result, "analysis": analysis})
 
 # Database session handling
 @app.teardown_appcontext

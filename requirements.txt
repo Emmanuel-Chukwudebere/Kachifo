@@ -11,6 +11,7 @@ click
 colorama
 cryptography
 distro
+en_core_web_sm
 Flask
 Flask[async]
 Flask-Caching
@@ -29,7 +30,6 @@ h11
 httpcore
 httplib2
 httpx
-huggingface-hub
 idna
 itsdangerous
 Jinja2
@@ -39,6 +39,7 @@ praw
 prawcore
 proto-plus
 protobuf
+psycopg2
 pyasn1
 pyasn1_modules
 pycparser
@@ -52,6 +53,7 @@ ratelimit
 requests
 rsa
 sniffio
+spacy
 SQLAlchemy
 torch
 torchaudio
