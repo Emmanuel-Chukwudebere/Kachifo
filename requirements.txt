@@ -11,7 +11,6 @@ click
 colorama
 cryptography
 distro
-en_core_web_sm
 Flask
 Flask[async]
 Flask-Caching
