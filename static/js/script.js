@@ -19,7 +19,7 @@ function scrollToBottom() {
 function formatMessageWithLinks(message) {
     const urlRegex = /(https?:\/\/[^\s]+)/g;  // Regular expression to detect URLs
     return message.replace(urlRegex, (url) => {
-        return `<a href="${url}" target="_blank">${url}</a>`;
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;  // Added rel attribute for security
     });
 }
 
@@ -27,6 +27,7 @@ function formatMessageWithLinks(message) {
 function createChatBubble(message, sender, isTyping = false) {
     const bubble = document.createElement('div');
     bubble.classList.add(sender === 'kachifo' ? 'kachifo-message' : 'user-message');
+    bubble.setAttribute('aria-live', 'polite');  // For accessibility
 
     if (sender === 'kachifo') {
         // Add Kachifo's logo next to the message
@@ -61,7 +62,7 @@ function createChatBubble(message, sender, isTyping = false) {
 }
 
 // Function to handle sending a message
-function sendMessage(message) {
+async function sendMessage(message) {
     if (!message) {
         message = userInput.value.trim();
     }
@@ -80,29 +81,35 @@ function sendMessage(message) {
     // Show typing indicator
     const typingBubble = createChatBubble('', 'kachifo', true);
 
-    // Fetch response from Flask backend
-    fetch('/search', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ query: message })
-    })
-    .then(response => response.json())
-    .then(data => {
+    try {
+        // Fetch response from Flask backend
+        const response = await fetch('/search', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query: message }),
+            timeout: 10000  // Adding a timeout of 10 seconds
+        });
+
+        if (!response.ok) {
+            throw new Error('Server error');
+        }
+
+        const data = await response.json();
         typingBubble.remove();
+
         if (data.response) {
             createChatBubble(data.response, 'kachifo');
         } else if (data.error) {
             createChatBubble(`Error: ${data.error}`, 'kachifo');
         }
-    })
-    .catch(error => {
+    } catch (error) {
         // Handle errors and show an error message
         typingBubble.remove();
         createChatBubble('Something went wrong. Please try again.', 'kachifo');
         console.error('Error:', error);
-    });
+    }
 }
 
 // Function to reset the chat
