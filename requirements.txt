@@ -35,6 +35,7 @@ itsdangerous
 Jinja2
 jiter
 MarkupSafe
+numpy
 praw
 prawcore
 proto-plus
