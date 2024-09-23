@@ -1,7 +1,7 @@
-numpy==2.1.1
-scipy==1.11.3
-pandas==2.1.2
-spacy==3.5.0
+numpy
+scipy
+pandas
+spacy
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.5.0/en_core_web_sm-3.5.0.tar.gz
 aiohttp
 aioflask
