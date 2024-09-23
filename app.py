@@ -28,8 +28,6 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Caching configuration
 app.config['CACHE_TYPE'] = 'simple'  # Use Redis in production for better performance
-app.config['CACHE_DEFAULT_TIMEOUT'] = 3600  # 1 hour
-cache = Cache(app)
 
 # Initialize database
 db = SQLAlchemy(app)
