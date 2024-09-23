@@ -21,7 +21,7 @@ except OSError:
     nlp = spacy.load("en_core_web_sm")
 
 # Cache setup: 1 hour time-to-live, max 1000 items
-cache = TTLCache(maxsize=1000, ttl=3600)
+# cache = TTLCache(maxsize=1000, ttl=3600)
 
 # API keys from environment variables
 def get_env_var(key):
