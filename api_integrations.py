@@ -1,6 +1,7 @@
 import os
 import requests
 import logging
+import sys
 from requests.auth import HTTPBasicAuth
 from requests.exceptions import RequestException
 import re
@@ -13,6 +14,23 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)  # You can adjust the level to INFO, ERROR, etc.
+
+# Create handlers
+console_handler = logging.StreamHandler(sys.stdout)
+file_handler = logging.FileHandler('Kachifo.log')
+
+# Set log format
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+file_handler.setFormatter(formatter)
+
+# Add handlers to logger
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
 
 # Initialize SpaCy NLP model
 try:
