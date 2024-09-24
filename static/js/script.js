@@ -5,21 +5,32 @@ const chatWindow = document.querySelector('.chat-window');
 const initialView = document.querySelector('.initial-view');
 const suggestions = document.querySelector('.suggestions');
 const newChatIcon = document.querySelector('.new-chat-icon');
-const loadingGifPath = 'static/icons/typing-gif.gif';  // Placeholder for loading gif path
-const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg';  // Placeholder for Kachifo logo path
+const loadingGifPath = 'static/icons/typing-gif.gif';
+const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg';
+
+// Debounce function to limit the rate of function calls
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
 
 // Function to automatically scroll to the latest message
-function scrollToBottom() {
-    requestAnimationFrame(() => {
-        chatWindow.scrollTop = chatWindow.scrollHeight;  // Force scroll to the bottom
-    });
-}
+const scrollToBottom = debounce(() => {
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+}, 100);
 
 // Function to format the message by converting URLs into clickable links
 function formatMessageWithLinks(message) {
-    const urlRegex = /(https?:\/\/[^\s]+)/g;  // Regular expression to detect URLs
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
     return message.replace(urlRegex, (url) => {
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;  // Added rel attribute for security
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
     });
 }
 
@@ -27,10 +38,9 @@ function formatMessageWithLinks(message) {
 function createChatBubble(message, sender, isTyping = false) {
     const bubble = document.createElement('div');
     bubble.classList.add(sender === 'kachifo' ? 'kachifo-message' : 'user-message');
-    bubble.setAttribute('aria-live', 'polite');  // For accessibility
+    bubble.setAttribute('aria-live', 'polite');
 
     if (sender === 'kachifo') {
-        // Add Kachifo's logo next to the message
         const kachifoLogo = document.createElement('img');
         kachifoLogo.src = kachifoLogoPath;
         kachifoLogo.alt = 'Kachifo Logo';
@@ -48,16 +58,12 @@ function createChatBubble(message, sender, isTyping = false) {
         loadingGif.classList.add('loading-gif');
         messageContent.appendChild(loadingGif);
     } else {
-        // Use formatMessageWithLinks function to replace URLs with clickable links
         messageContent.innerHTML = formatMessageWithLinks(message);
     }
 
     bubble.appendChild(messageContent);
     chatWindow.appendChild(bubble);
-
-    // Ensure the chat window scrolls to the bottom after the message is added
     scrollToBottom();
-
     return bubble;
 }
 
@@ -68,47 +74,50 @@ async function sendMessage(message) {
     }
     if (message === '') return;
 
-    // Create user message bubble
+    console.log('Search initiated', { query: message, timestamp: new Date().toISOString() });
+
     createChatBubble(message, 'user');
     userInput.value = '';
-    userInput.style.height = 'auto'; // Reset input field height
+    userInput.style.height = 'auto';
 
-    // Hide initial view and show chat window
     initialView.classList.add('hidden');
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
 
-    // Show typing indicator
     const typingBubble = createChatBubble('', 'kachifo', true);
 
     try {
-        // Fetch response from Flask backend
         const response = await fetch('/search', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ query: message }),
-            timeout: 10000  // Adding a timeout of 10 seconds
+            body: JSON.stringify({ q: message }),
+            timeout: 30000 // 30 seconds timeout
         });
 
         if (!response.ok) {
-            throw new Error('Server error');
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
 
         const data = await response.json();
         typingBubble.remove();
 
-        if (data.response) {
-            createChatBubble(data.response, 'kachifo');
+        if (Array.isArray(data)) {
+            // Assuming the response is an array of results
+            const formattedResponse = data.map(item => 
+                `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}`
+            ).join('\n\n');
+            createChatBubble(formattedResponse, 'kachifo');
         } else if (data.error) {
             createChatBubble(`Error: ${data.error}`, 'kachifo');
+        } else {
+            createChatBubble('Received an unexpected response format.', 'kachifo');
         }
     } catch (error) {
-        // Handle errors and show an error message
+        console.error('Error:', error);
         typingBubble.remove();
         createChatBubble('Something went wrong. Please try again.', 'kachifo');
-        console.error('Error:', error);
     }
 }
 
@@ -118,7 +127,7 @@ function resetChat() {
     initialView.classList.remove('hidden');
     suggestions.classList.remove('hidden');
     chatWindow.classList.remove('active');
-    scrollToBottom(); // Scroll to bottom after resetting chat
+    scrollToBottom();
 }
 
 // Function to check if the user is on a desktop
@@ -138,10 +147,9 @@ userInput.addEventListener('keypress', (e) => {
 });
 
 // Auto-resize input field and handle typing state
-userInput.addEventListener('input', function() {
+userInput.addEventListener('input', debounce(function() {
     this.style.height = 'auto';
     this.style.height = (this.scrollHeight) + 'px';
-
     if (this.value.trim() !== '') {
         initialView.classList.add('typing');
         suggestions.classList.add('typing');
@@ -149,7 +157,7 @@ userInput.addEventListener('input', function() {
         initialView.classList.remove('typing');
         suggestions.classList.remove('typing');
     }
-});
+}, 100));
 
 // Event listeners for suggestions
 document.querySelectorAll('.suggestion').forEach(suggestion => {
@@ -163,3 +171,8 @@ newChatIcon.addEventListener('click', resetChat);
 
 // Initial scroll to bottom on page load
 scrollToBottom();
+
+// Error handling for unhandled promise rejections
+window.addEventListener('unhandledrejection', function(event) {
+    console.error('Unhandled promise rejection:', event.reason);
+});
