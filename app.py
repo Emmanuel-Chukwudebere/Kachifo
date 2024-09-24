@@ -196,6 +196,23 @@ def recent_searches():
         logger.error(f"Error fetching recent searches: {str(e)}", exc_info=True)
         return jsonify({'error': 'Failed to fetch recent searches. Please try again later.'}), 500
 
+@app.route('/process-query', methods=['POST'])
+def process_query():
+    data = request.get_json()  # Get the JSON data from the POST request
+    
+    if 'query' not in data:
+        return jsonify({'error': 'No query provided'}), 400
+    
+    user_query = data['query']  # Extract the query text
+    doc = nlp(user_query)  # Process the query with spaCy
+    
+    # Extract useful information from spaCy, e.g., named entities
+    processed_query = {
+        'entities': [(ent.text, ent.label_) for ent in doc.ents]
+    }
+
+    return jsonify({'processed_query': processed_query}), 200
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
