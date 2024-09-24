@@ -139,27 +139,27 @@ def home():
 @app.route('/search', methods=['GET', 'POST'])
 @rate_limit
 def search_trends():
-    query = None
-    if request.method == 'GET':
-        query = request.args.get('q', '')
-    elif request.method == 'POST':
-        if request.is_json:
-            data = request.get_json()
-            query = data.get('q')
-        else:
-            query = request.form.get('q')
-    
-    if not query:
-        logger.warning("Search query is missing")
-        return jsonify({'error': 'Query parameter is required'}), 400
-    
-    query = sanitize_input(query)
-    logger.info(f"Processing search query: {query}")
-
     try:
+        if request.method == 'GET':
+            query = request.args.get('q')
+        elif request.method == 'POST':
+            if request.is_json:
+                query = request.json.get('q')
+            else:
+                query = request.form.get('q')
+        else:
+            raise BadRequest("Unsupported HTTP method")
+
+        if not query:
+            current_app.logger.warning(f"Search query is missing. Method: {request.method}, Headers: {request.headers}, Data: {request.data}")
+            return jsonify({'error': 'Query parameter "q" is required'}), 400
+
+        query = sanitize_input(query)
+        current_app.logger.info(f"Processing search query: {query}")
+
         results = fetch_trending_topics(query)
-        logger.info(f"Search results for '{query}': {len(results)} items found")
-        
+        current_app.logger.info(f"Search results for '{query}': {len(results)} items found")
+
         # Store results in database
         for result in results:
             new_trend = Trend(
@@ -170,16 +170,20 @@ def search_trends():
                 url=result['url']
             )
             db.session.add(new_trend)
-        
+
         # Store user query
         new_query = UserQuery(query=query)
         db.session.add(new_query)
         db.session.commit()
-        
+
         return jsonify(results)
+
+    except BadRequest as e:
+        current_app.logger.error(f"Bad request: {str(e)}")
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
-        logger.error(f"Error while fetching trends: {str(e)}", exc_info=True)
-        return jsonify({'error': 'Failed to fetch trending topics. Please try again later.'}), 500
+        current_app.logger.error(f"Error while processing search: {str(e)}", exc_info=True)
+        return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
 
 @app.route('/recent_searches', methods=['GET'])
 def recent_searches():
