@@ -139,14 +139,15 @@ def home():
 @app.route('/search', methods=['GET', 'POST'])
 @rate_limit
 def search_trends():
+    query = None
     if request.method == 'GET':
         query = request.args.get('q', '')
     elif request.method == 'POST':
-        data = request.get_json()
-        if not data or 'q' not in data:
-            logger.error("POST request missing 'q' in body")
-            return jsonify({'error': 'Query parameter is required in body for POST'}), 400
-        query = data['q']
+        if request.is_json:
+            data = request.get_json()
+            query = data.get('q')
+        else:
+            query = request.form.get('q')
     
     if not query:
         logger.warning("Search query is missing")
