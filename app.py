@@ -51,7 +51,7 @@ class UserQuery(db.Model):
 # Advanced logging setup
 def setup_logging():
     log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
-    log_file = os.environ.get('LOG_FILE', '/var/log/kachifo/kachifo.log')
+    log_file = os.environ.get('LOG_FILE', 'kachifo.log')
     max_log_size = 10 * 1024 * 1024  # 10 MB
     backup_count = 5
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
