@@ -5,8 +5,6 @@ from requests.exceptions import RequestException
 from cachetools import cached, TTLCache
 import re
 from dotenv import load_dotenv
-from bs4 import BeautifulSoup
-import html2text
 import spacy
 
 # Load environment variables
@@ -14,6 +12,7 @@ load_dotenv()
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Initialize SpaCy NLP model
 try:
@@ -50,132 +49,207 @@ def sanitize_input(query):
     logger.info(f"Sanitized input: {sanitized}")
     return sanitized
 
-# Helper function for summarizing text using SpaCy
-def summarize_text(text, max_sentences=3):
-    """Summarize text using SpaCy NLP."""
+# Use SpaCy to summarize text
+def summarize_text(text):
+    """Summarize the provided text using NLP."""
     doc = nlp(text)
     sentences = list(doc.sents)
-    if not sentences:
-        return "No content available."
-    return " ".join(str(sent) for sent in sentences[:max_sentences])
+    summary = " ".join(str(sent) for sent in sentences[:3])  # Use first 3 sentences
+    logger.info(f"Generated summary: {summary}")
+    return summary
 
-# Helper function to fetch and parse webpage content
-def fetch_webpage_content(url):
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-        h = html2text.HTML2Text()
-        h.ignore_links = True
-        text_content = h.handle(soup.get_text())
-        return summarize_text(text_content)
-    except Exception as e:
-        logger.error(f"Error fetching webpage content: {str(e)}")
-        return "Unable to fetch content."
-
-# Error handling decorator for API requests
-def handle_api_errors(func):
-    """Decorator to handle API errors gracefully."""
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except RequestException as e:
-            logger.error(f"API request failed: {str(e)}", exc_info=True)
-            return {'error': 'API request failed. Please try again later.'}
-        except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-            return {'error': 'An unexpected error occurred. Please try again later.'}
-    return wrapper
-
-@handle_api_errors
+# Fetch trending topics from different sources
 @cached(cache)
 def fetch_trending_topics(query):
-    """Fetch trending topics from YouTube, Reddit, and Twitter based on a query."""
-    logger.info(f"Fetching trending topics for query: {query}")
-    sanitized_query = sanitize_input(query)
-    combined_results = []
-    
-    # YouTube API
-    youtube_results = fetch_youtube_trends(sanitized_query)
-    combined_results.extend(youtube_results)
-    
-    # Reddit API
-    reddit_results = fetch_reddit_trends(sanitized_query)
-    combined_results.extend(reddit_results)
-    
-    # Twitter API
-    twitter_results = fetch_twitter_trends(sanitized_query)
-    combined_results.extend(twitter_results)
-    
-    logger.info(f"Total results fetched: {len(combined_results)}")
-    return combined_results
+    try:
+        logger.info(f"Fetching trends for query: {query}")
+        
+        # Fetch from multiple sources
+        youtube_results = fetch_youtube_trends(query)
+        reddit_results = fetch_reddit_trends(query)
+        news_results = fetch_news_trends(query)
+        twitter_results = fetch_twitter_trends(query)
+        google_results = fetch_google_trends(query)
+        
+        results = youtube_results + reddit_results + news_results + twitter_results + google_results
+        
+        # Limit to first 10 results
+        return results[:10]
 
-@handle_api_errors
+    except Exception as e:
+        logger.error(f"Error fetching trending topics: {str(e)}", exc_info=True)
+        return []
+
+# API integration functions
 def fetch_youtube_trends(query):
-    youtube_url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&type=video&key={YOUTUBE_API_KEY}"
-    youtube_response = requests.get(youtube_url, timeout=10)
-    youtube_data = youtube_response.json()
-    results = []
-    for item in youtube_data.get('items', []):
-        video_id = item['id']['videoId']
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-        results.append({
-            'source': 'YouTube',
-            'title': item['snippet']['title'],
-            'summary': summarize_text(item['snippet']['description']),
-            'url': video_url
-        })
-    logger.info(f"YouTube results fetched: {len(results)}")
-    return results
+    """Fetch trending YouTube videos matching the query."""
+    try:
+        logger.info(f"Fetching YouTube trends for query: {query}")
+        search_url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&key={YOUTUBE_API_KEY}"
+        response = requests.get(search_url)
+        response.raise_for_status()
+        data = response.json()
 
-@handle_api_errors
+        results = []
+        for item in data.get('items', []):
+            title = item['snippet']['title']
+            description = item['snippet']['description']
+            video_url = f"https://www.youtube.com/watch?v={item['id']['videoId']}"
+            
+            # Summarize description using SpaCy
+            summary = summarize_text(description)
+            
+            results.append({
+                'source': 'YouTube',
+                'title': title,
+                'summary': summary,
+                'url': video_url
+            })
+        
+        logger.info(f"Fetched {len(results)} YouTube trends.")
+        return results
+    except RequestException as e:
+        logger.error(f"Error fetching YouTube trends: {str(e)}")
+        return []
+
 def fetch_reddit_trends(query):
-    reddit_url = f"https://www.reddit.com/search.json?q={query}&sort=top&t=week"
-    reddit_response = requests.get(reddit_url, headers={'User-Agent': REDDIT_USER_AGENT}, timeout=10)
-    reddit_data = reddit_response.json()
-    results = []
-    for post in reddit_data.get('data', {}).get('children', []):
-        post_url = f"https://www.reddit.com{post['data']['permalink']}"
-        summary = summarize_text(post['data'].get('selftext', '')) if post['data'].get('selftext') else fetch_webpage_content(post_url)
-        results.append({
-            'source': 'Reddit',
-            'title': post['data']['title'],
-            'summary': summary,
-            'url': post_url
-        })
-    logger.info(f"Reddit results fetched: {len(results)}")
-    return results
+    """Fetch trending Reddit posts matching the query."""
+    try:
+        logger.info(f"Fetching Reddit trends for query: {query}")
+        reddit_auth = requests.auth.HTTPBasicAuth(REDDIT_CLIENT_ID, REDDIT_SECRET)
+        reddit_headers = {
+            'User-Agent': REDDIT_USER_AGENT
+        }
+        reddit_data = {
+            'grant_type': 'client_credentials'
+        }
+        
+        token_response = requests.post('https://www.reddit.com/api/v1/access_token', auth=reddit_auth, data=reddit_data, headers=reddit_headers)
+        token_response.raise_for_status()
+        token = token_response.json()['access_token']
+        
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'User-Agent': REDDIT_USER_AGENT
+        }
+        
+        search_url = f"https://oauth.reddit.com/r/all/search?q={query}&limit=10"
+        response = requests.get(search_url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
 
-@handle_api_errors
+        results = []
+        for item in data['data']['children']:
+            title = item['data']['title']
+            selftext = item['data']['selftext']
+            post_url = f"https://reddit.com{item['data']['permalink']}"
+            
+            # Summarize post text using SpaCy
+            summary = summarize_text(selftext)
+            
+            results.append({
+                'source': 'Reddit',
+                'title': title,
+                'summary': summary,
+                'url': post_url
+            })
+
+        logger.info(f"Fetched {len(results)} Reddit trends.")
+        return results
+    except RequestException as e:
+        logger.error(f"Error fetching Reddit trends: {str(e)}")
+        return []
+
+def fetch_news_trends(query):
+    """Fetch trending news articles matching the query."""
+    try:
+        logger.info(f"Fetching news trends for query: {query}")
+        search_url = f"https://newsapi.org/v2/everything?q={query}&apiKey={NEWSAPI_KEY}"
+        response = requests.get(search_url)
+        response.raise_for_status()
+        data = response.json()
+
+        results = []
+        for article in data['articles']:
+            title = article['title']
+            content = article['content'] or article['description']
+            article_url = article['url']
+            
+            # Summarize content using SpaCy
+            summary = summarize_text(content)
+            
+            results.append({
+                'source': 'NewsAPI',
+                'title': title,
+                'summary': summary,
+                'url': article_url
+            })
+
+        logger.info(f"Fetched {len(results)} news trends.")
+        return results
+    except RequestException as e:
+        logger.error(f"Error fetching news trends: {str(e)}")
+        return []
+
 def fetch_twitter_trends(query):
-    twitter_url = f"https://api.twitter.com/2/tweets/search/recent?query={query}&tweet.fields=created_at,entities"
-    twitter_response = requests.get(twitter_url, headers={'Authorization': f"access {TWITTER_ACCESS_TOKEN}"}, timeout=10)
-    twitter_data = twitter_response.json()
-    results = []
-    for tweet in twitter_data.get('data', []):
-        tweet_url = f"https://twitter.com/i/web/status/{tweet['id']}"
-        summary = summarize_text(tweet['text'])
-        if 'entities' in tweet and 'urls' in tweet['entities']:
-            for url in tweet['entities']['urls']:
-                expanded_url = url['expanded_url']
-                if expanded_url != tweet_url:
-                    summary += " " + fetch_webpage_content(expanded_url)
-        results.append({
-            'source': 'Twitter',
-            'title': tweet['text'][:100] + "...",  # Use first 100 characters as title
-            'summary': summary,
-            'url': tweet_url
-        })
-    logger.info(f"Twitter results fetched: {len(results)}")
-    return results
+    """Fetch trending tweets matching the query."""
+    try:
+        logger.info(f"Fetching Twitter trends for query: {query}")
+        search_url = f"https://api.twitter.com/2/tweets/search/recent?query={query}&tweet.fields=text"
+        headers = {
+            "Authorization": f"Bearer {TWITTER_ACCESS_TOKEN}"
+        }
+        response = requests.get(search_url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
 
-if __name__ == "__main__":
-    # Test the function
-    test_query = "artificial intelligence"
-    results = fetch_trending_topics(test_query)
-    print(f"Results for '{test_query}':")
-    for result in results:
-        print(f"- {result['source']}: {result['title']}")
-        print(f"  Summary: {result['summary']}")
-        print(f"  URL: {result['url']}")
-    print()
+        results = []
+        for tweet in data.get('data', []):
+            tweet_text = tweet['text']
+            
+            # Summarize tweet text using SpaCy
+            summary = summarize_text(tweet_text)
+            
+            results.append({
+                'source': 'Twitter',
+                'title': "Tweet",
+                'summary': summary,
+                'url': f"https://twitter.com/twitter/status/{tweet['id']}"
+            })
+
+        logger.info(f"Fetched {len(results)} Twitter trends.")
+        return results
+    except RequestException as e:
+        logger.error(f"Error fetching Twitter trends: {str(e)}")
+        return []
+
+def fetch_google_trends(query):
+    """Fetch Google Custom Search results matching the query."""
+    try:
+        logger.info(f"Fetching Google search trends for query: {query}")
+        search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&key={GOOGLE_API_KEY}&cx={os.getenv('GOOGLE_CSE_ID')}"
+        response = requests.get(search_url)
+        response.raise_for_status()
+        data = response.json()
+
+        results = []
+        for item in data.get('items', []):
+            title = item['title']
+            snippet = item['snippet']
+            link = item['link']
+            
+            # Summarize snippet using SpaCy
+            summary = summarize_text(snippet)
+            
+            results.append({
+                'source': 'Google',
+                'title': title,
+                'summary': summary,
+                'url': link
+            })
+
+        logger.info(f"Fetched {len(results)} Google trends.")
+        return results
+    except RequestException as e:
+        logger.error(f"Error fetching Google trends: {str(e)}")
+        return []
