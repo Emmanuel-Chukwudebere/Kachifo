@@ -87,8 +87,8 @@ async function sendMessage(message) {
     const typingBubble = createChatBubble('', 'kachifo', true);
 
     try {
-        const response = await fetch('/search', {
-            method: 'POST',
+        const response = await fetch('/process-query', {
+            method: 'POST',  // Using POST to send queries
             headers: {
                 'Content-Type': 'application/json'
             },
@@ -118,6 +118,35 @@ async function sendMessage(message) {
         console.error('Error:', error);
         typingBubble.remove();
         createChatBubble('Something went wrong. Please try again.', 'kachifo');
+    }
+}
+
+// Function to handle searching for trends (GET method)
+async function fetchSearchResults(query) {
+    try {
+        const response = await fetch(`/search?q=${encodeURIComponent(query)}`, {
+            method: 'GET',
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (Array.isArray(data)) {
+            const formattedResponse = data.map(item => 
+                `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}`
+            ).join('\n\n');
+            createChatBubble(formattedResponse, 'kachifo');
+        } else if (data.error) {
+            createChatBubble(`Error: ${data.error}`, 'kachifo');
+        } else {
+            createChatBubble('Received an unexpected response format.', 'kachifo');
+        }
+    } catch (error) {
+        console.error('Error fetching search results:', error);
+        createChatBubble('Error fetching search results. Please try again.', 'kachifo');
     }
 }
 
