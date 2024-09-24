@@ -3,6 +3,7 @@ from flask import Flask, request, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
 from flask_caching import Cache
 from flask_talisman import Talisman
+from flask import current_app
 from functools import wraps
 import logging
 from logging.handlers import RotatingFileHandler
@@ -11,6 +12,7 @@ import re
 from api_integrations import fetch_trending_topics
 from werkzeug.exceptions import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
+from werkzeug.exceptions import BadRequest
 
 # Initialize Flask app
 app = Flask(__name__)
