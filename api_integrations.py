@@ -38,7 +38,7 @@ def get_env_var(key):
 YOUTUBE_API_KEY = get_env_var('YOUTUBE_API_KEY')
 GOOGLE_API_KEY = get_env_var('GOOGLE_API_KEY')
 NEWSAPI_KEY = get_env_var('NEWSAPI_KEY')
-TWITTER_BEARER_TOKEN = get_env_var('TWITTER_BEARER_TOKEN')
+TWITTER_ACCESS_TOKEN = get_env_var('TWITTER_ACCESS_TOKEN')
 REDDIT_CLIENT_ID = get_env_var('REDDIT_CLIENT_ID')
 REDDIT_SECRET = get_env_var('REDDIT_SECRET')
 REDDIT_USER_AGENT = get_env_var('REDDIT_USER_AGENT')
@@ -149,7 +149,7 @@ def fetch_reddit_trends(query):
 @handle_api_errors
 def fetch_twitter_trends(query):
     twitter_url = f"https://api.twitter.com/2/tweets/search/recent?query={query}&tweet.fields=created_at,entities"
-    twitter_response = requests.get(twitter_url, headers={'Authorization': f"Bearer {TWITTER_BEARER_TOKEN}"}, timeout=10)
+    twitter_response = requests.get(twitter_url, headers={'Authorization': f"access {TWITTER_ACCESS_TOKEN}"}, timeout=10)
     twitter_data = twitter_response.json()
     results = []
     for tweet in twitter_data.get('data', []):
