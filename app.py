@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 app = Flask(__name__)
 
 # Load configuration from environment variables
-app.config.from_object('config.ProductionConfig')
+# app.config.from_object('config.ProductionConfig')
 
 # Security: Use Flask-Talisman to enforce HTTPS, set secure headers (Content Security Policy)
 Talisman(app, content_security_policy={
