@@ -37,7 +37,7 @@ def get_env_var(key):
 YOUTUBE_API_KEY = get_env_var('YOUTUBE_API_KEY')
 GOOGLE_API_KEY = get_env_var('GOOGLE_API_KEY')
 NEWSAPI_KEY = get_env_var('NEWSAPI_KEY')
-TWITTER_ACCESS_TOKEN = get_env_var('TWITTER_ACCESS_TOKEN')
+TWITTER_BEARER_TOKEN = get_env_var('TWITTER_BEARER_TOKEN')
 REDDIT_CLIENT_ID = get_env_var('REDDIT_CLIENT_ID')
 REDDIT_SECRET = get_env_var('REDDIT_SECRET')
 REDDIT_USER_AGENT = get_env_var('REDDIT_USER_AGENT')
@@ -124,9 +124,9 @@ def fetch_reddit_trends(query):
             'grant_type': 'client_credentials'
         }
         
-        token_response = requests.post('https://www.reddit.com/api/v1/access_token', auth=reddit_auth, data=reddit_data, headers=reddit_headers)
+        token_response = requests.post('https://www.reddit.com/api/v1/bearer_token', auth=reddit_auth, data=reddit_data, headers=reddit_headers)
         token_response.raise_for_status()
-        token = token_response.json()['access_token']
+        token = token_response.json()['bearer_token']
         
         headers = {
             'Authorization': f'Bearer {token}',
@@ -197,7 +197,7 @@ def fetch_twitter_trends(query):
         logger.info(f"Fetching Twitter trends for query: {query}")
         search_url = f"https://api.twitter.com/2/tweets/search/recent?query={query}&tweet.fields=text"
         headers = {
-            "Authorization": f"Bearer {TWITTER_ACCESS_TOKEN}"
+            "Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"
         }
         response = requests.get(search_url, headers=headers)
         response.raise_for_status()
