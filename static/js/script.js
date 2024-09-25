@@ -8,6 +8,24 @@ const newChatIcon = document.querySelector('.new-chat-icon');
 const loadingGifPath = 'static/icons/typing-gif.gif';
 const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg';
 
+// Debounce function to limit the rate of function calls
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Function to automatically scroll to the latest message
+const scrollToBottom = debounce(() => {
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+}, 100);
+
 // Function to format the message by converting URLs into clickable links
 function formatMessageWithLinks(message) {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -56,6 +74,8 @@ async function sendMessage(message) {
     }
     if (message === '') return;
 
+    console.log('Search initiated', { query: message, timestamp: new Date().toISOString() });
+
     createChatBubble(message, 'user');
     userInput.value = '';
     userInput.style.height = 'auto';
@@ -68,12 +88,12 @@ async function sendMessage(message) {
 
     try {
         const response = await fetch('/process-query', {
-            method: 'POST',
+            method: 'POST',  // Using POST to send queries
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ q: message }),
-            timeout: 30000
+            timeout: 30000 // 30 seconds timeout
         });
 
         if (!response.ok) {
@@ -83,8 +103,9 @@ async function sendMessage(message) {
         const data = await response.json();
         typingBubble.remove();
 
-        if (data.results && Array.isArray(data.results)) {
-            const formattedResponse = data.results.map(item => 
+        if (Array.isArray(data)) {
+            // Assuming the response is an array of results
+            const formattedResponse = data.map(item => 
                 `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}\n\nEntities: ${item.entities.join(', ')}\nVerbs: ${item.verbs.join(', ')}\nNouns: ${item.nouns.join(', ')}`
             ).join('\n\n');
             createChatBubble(formattedResponse, 'kachifo');
@@ -100,10 +121,9 @@ async function sendMessage(message) {
     }
 }
 
-// Function to handle searching for trends (GET method) via /search
+// Function to handle searching for trends (GET method)
 async function fetchSearchResults(query) {
     try {
-        // Fetch search results from the /search endpoint
         const response = await fetch(`/search?q=${encodeURIComponent(query)}`, {
             method: 'GET',
         });
@@ -113,10 +133,10 @@ async function fetchSearchResults(query) {
         }
 
         const data = await response.json();
+
         if (Array.isArray(data.results)) {
-            // Assuming response has a 'results' array
             const formattedResponse = data.results.map(item => 
-                `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}`
+                `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}\n\nEntities: ${item.entities.join(', ')}\nVerbs: ${item.verbs.join(', ')}\nNouns: ${item.nouns.join(', ')}`
             ).join('\n\n');
             createChatBubble(formattedResponse, 'kachifo');
         } else if (data.error) {
@@ -133,7 +153,6 @@ async function fetchSearchResults(query) {
 // Function to fetch recent searches (GET method)
 async function fetchRecentSearches() {
     try {
-        // Fetch recent searches from the /recent_searches endpoint
         const response = await fetch('/recent_searches', {
             method: 'GET',
         });
@@ -144,7 +163,6 @@ async function fetchRecentSearches() {
 
         const data = await response.json();
         if (Array.isArray(data.recent)) {
-            // Assuming response has a 'recent' array
             const formattedResponse = data.recent.map(search => 
                 `Query: ${search.query}\nTimestamp: ${search.timestamp}`
             ).join('\n\n');
@@ -159,16 +177,6 @@ async function fetchRecentSearches() {
         createChatBubble('Error fetching recent searches. Please try again.', 'kachifo');
     }
 }
-
-// Event listener or function trigger to call fetchRecentSearches when needed
-// You can call fetchRecentSearches when a "Recent Searches" button is clicked, for example.
-
-const recentSearchesBtn = document.getElementById('recent-searches-btn');
-
-// Event listener for the Recent Searches button
-recentSearchesBtn.addEventListener('click', () => {
-    fetchRecentSearches();
-});
 
 // Function to reset the chat
 function resetChat() {
@@ -185,7 +193,9 @@ function isDesktop() {
 }
 
 // Event listener for the send button
-sendBtn.addEventListener('click', () => sendMessage());
+sendBtn.addEventListener('click', () => {
+    sendMessage();
+});
 
 // Event listener for pressing "Enter" key in the input field (only for desktop)
 userInput.addEventListener('keypress', (e) => {
