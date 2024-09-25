@@ -106,22 +106,25 @@ def log_response_info(response):
     logger.debug(f'Headers: {response.headers}')
     return response
 
+
 # Rate limiting (with added headers to indicate remaining quota)
 def rate_limit(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        user_ip = request.remote_addr
-        key = f"rate_limit_{user_ip}"
+        key = "global_rate_limit"
         remaining_requests = cache.get(key)
         if remaining_requests is None:
-            remaining_requests = 50
+            remaining_requests = 60  # Set a higher limit for global usage
         elif remaining_requests <= 0:
-            logger.warning(f"Rate limit exceeded for IP: {user_ip}")
+            logger.warning("Global rate limit exceeded")
             return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
+        
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
-        logger.info(f"Remaining requests for {user_ip}: {remaining_requests - 1}")
+        logger.info(f"Remaining global requests: {remaining_requests - 1}")
+        
         response = func(*args, **kwargs)
         response.headers['X-RateLimit-Remaining'] = remaining_requests - 1
+        response.headers['X-RateLimit-Limit'] = 60  # Add this header to show the total limit
         return response
     return wrapper
 
