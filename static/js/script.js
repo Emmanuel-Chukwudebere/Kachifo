@@ -170,6 +170,31 @@ recentSearchesBtn.addEventListener('click', () => {
     fetchRecentSearches();
 });
 
+// Function to reset the chat
+function resetChat() {
+    chatWindow.innerHTML = '';
+    initialView.classList.remove('hidden');
+    suggestions.classList.remove('hidden');
+    chatWindow.classList.remove('active');
+    scrollToBottom();
+}
+
+// Function to check if the user is on a desktop
+function isDesktop() {
+    return window.innerWidth >= 1024;
+}
+
+// Event listener for the send button
+sendBtn.addEventListener('click', () => sendMessage());
+
+// Event listener for pressing "Enter" key in the input field (only for desktop)
+userInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && isDesktop()) {
+        e.preventDefault();
+        sendMessage();
+    }
+});
+
 // Auto-resize input field and handle typing state
 userInput.addEventListener('input', debounce(function() {
     this.style.height = 'auto';
@@ -183,8 +208,20 @@ userInput.addEventListener('input', debounce(function() {
     }
 }, 100));
 
-// Event listener for the send button
-sendBtn.addEventListener('click', () => sendMessage());
+// Event listeners for suggestions
+document.querySelectorAll('.suggestion').forEach(suggestion => {
+    suggestion.addEventListener('click', () => {
+        sendMessage(suggestion.textContent);
+    });
+});
+
+// Event listener for the New Chat icon
+newChatIcon.addEventListener('click', resetChat);
 
 // Initial scroll to bottom on page load
 scrollToBottom();
+
+// Error handling for unhandled promise rejections
+window.addEventListener('unhandledrejection', function(event) {
+    console.error('Unhandled promise rejection:', event.reason);
+});
