@@ -73,7 +73,9 @@ async function sendMessage(message) {
         message = userInput.value.trim();
     }
     if (message === '') return;
+
     console.log('Search initiated', { query: message, timestamp: new Date().toISOString() });
+
     createChatBubble(message, 'user');
     userInput.value = '';
     userInput.style.height = 'auto';
@@ -81,25 +83,34 @@ async function sendMessage(message) {
     initialView.classList.add('hidden');
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
+
     const typingBubble = createChatBubble('', 'kachifo', true);
+
     try {
         const response = await fetch('/process-query', {
-            method: 'POST',
+            method: 'POST',  // Using POST to send queries
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ q: message }),
             timeout: 30000 // 30 seconds timeout
         });
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
+
         const data = await response.json();
         typingBubble.remove();
-        if (data.error) {
+
+        if (Array.isArray(data)) {
+            // Assuming the response is an array of results
+            const formattedResponse = data.map(item => 
+                `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}\n\nEntities: ${item.entities.join(', ')}\nVerbs: ${item.verbs.join(', ')}\nNouns: ${item.nouns.join(', ')}`
+            ).join('\n\n');
+            createChatBubble(formattedResponse, 'kachifo');
+        } else if (data.error) {
             createChatBubble(`Error: ${data.error}`, 'kachifo');
-        } else if (data.data && data.data.response) {
-            createChatBubble(data.data.response, 'kachifo');
         } else {
             createChatBubble('Received an unexpected response format.', 'kachifo');
         }
