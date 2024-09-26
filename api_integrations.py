@@ -86,27 +86,56 @@ def fetch_trending_topics(user_input: str) -> str:
         logger.info(f"Processing user input: {user_input}")
         query = process_user_input(user_input)
         logger.info(f"Extracted query: {query}")
-
         results = []
         results.extend(fetch_youtube_trends(query))
         results.extend(fetch_news_trends(query))
         results.extend(fetch_twitter_trends(query))
         results.extend(fetch_reddit_trends(query))
         results.extend(fetch_google_trends(query))
-
         # Limit to first 10 results
         results = results[:10]
-
+        
         if not results:
             return f"I couldn't find any relevant trends about {query} at the moment. Could you try rephrasing your query or exploring a different topic?"
-
+        
         # Generate dynamic response
         return generate_dynamic_response(user_input, results)
-
     except Exception as e:
         logger.error(f"Error fetching trending topics: {str(e)}", exc_info=True)
         return f"I apologize, but I encountered an unexpected issue while fetching trends about {query}. Could we try again with a different query?"
 
+def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) -> str:
+    """Generate a dynamic response using SpaCy analysis of user input and API results."""
+    doc = nlp(user_input)
+    main_topic = next((token.text for token in doc if token.pos_ in ['NOUN', 'PROPN']), "this topic")
+    sentiment = doc.sentiment
+    
+    # Generate introduction based on sentiment
+    if sentiment > 0.5:
+        intro = f"Great choice! I found some exciting trends about {main_topic}:"
+    elif sentiment < -0.5:
+        intro = f"I understand your concern about {main_topic}. Here's what's trending:"
+    else:
+        intro = f"Here's what I discovered about {main_topic}:"
+    
+    response = f"{intro}\n\n"
+    
+    for result in results:
+        response += f" {result['source']}: {result['title']}\n"
+        response += f" {result['summary']}\n"
+        response += f" More at: {result['url']}\n\n"
+    
+    # Generate a conclusion
+    if len(results) > 5:
+        conclusion = f"Wow, there's a lot of buzz around {main_topic}! Which aspect interests you most?"
+    else:
+        conclusion = f"These are the top trends for {main_topic}. Would you like to explore any specific area further?"
+    
+    response += conclusion
+    
+    return response
+    
+    
 # Fetch YouTube trends
 def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending YouTube videos matching the query."""
