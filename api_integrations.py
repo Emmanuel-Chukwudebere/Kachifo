@@ -92,6 +92,7 @@ def fetch_trending_topics(user_input: str) -> str:
         results.extend(fetch_news_trends(query))
         results.extend(fetch_twitter_trends(query))
         results.extend(fetch_reddit_trends(query))
+        results.extend(fetch_google_trends(query))
 
         # Limit to first 10 results
         results = results[:10]
