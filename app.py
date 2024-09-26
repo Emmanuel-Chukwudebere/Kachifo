@@ -209,20 +209,25 @@ def search_trends():
         results = fetch_trending_topics(query)
         current_app.logger.info(f"Search results for '{query}': {len(results)} items found")
 
-        # Process the fetched results with spaCy
-        processed_results = []
-        for result in results:
-            result_text = f"{result.get('title', '')} {result.get('summary', '')}"
-            processed_result_data = process_query_with_spacy(result_text)
-            processed_results.append({
-                'source': result.get('source', ''),
-                'title': result.get('title', ''),
-                'summary': result.get('summary', ''),
-                'url': result.get('url', ''),
-                'entities': processed_result_data['entities'],
-                'verbs': processed_result_data['verbs'],
-                'nouns': processed_result_data['nouns']
-            })
+        # Process the fetched results with spaCy and Ensure the results are JSON-serializable
+for result in results:
+    if isinstance(result, dict):
+        result_text = f"{result.get('title', '')} {result.get('summary', '')}"
+        processed_result_data = process_query_with_spacy(result_text)
+        processed_results.append({
+            'source': result.get('source', ''),
+            'title': result.get('title', ''),
+            'summary': result.get('summary', ''),
+            'url': result.get('url', ''),
+            'entities': processed_result_data['entities'],
+            'verbs': processed_result_data['verbs'],
+            'nouns': processed_result_data['nouns']
+        })
+    else:
+        # Ensure non-dictionary results are serialized appropriately
+        processed_results.append({
+            'text': str(result)  # Ensure it's serialized as a string
+        })
 
         # Ensure we return JSON-serializable data
         return create_standard_response({
@@ -286,20 +291,30 @@ def process_query():
 
         # Fetch trending topics or perform search
         results = fetch_trending_topics(query)
-        processed_results = []
-        for result in results:
-            result_text = f"{result.get('title', '')} {result.get('summary', '')}"
-            processed_result_data = process_query_with_spacy(result_text)
-            processed_results.append({
-                'source': result.get('source', ''),
-                'title': result.get('title', ''),
-                'summary': result.get('summary', ''),
-                'url': result.get('url', ''),
-                'entities': processed_result_data['entities'],
-                'verbs': processed_result_data['verbs'],
-                'nouns': processed_result_data['nouns']
-            })
 
+# Ensure the results are JSON-serializable
+for result in results:
+    if isinstance(result, dict):
+        result_text = f"{result.get('title', '')} {result.get('summary', '')}"
+        processed_result_data = process_query_with_spacy(result_text)
+        processed_results.append({
+            'source': result.get('source', ''),
+            'title': result.get('title', ''),
+            'summary': result.get('summary', ''),
+            'url': result.get('url', ''),
+            'entities': processed_result_data['entities'],
+            'verbs': processed_result_data['verbs'],
+            'nouns': processed_result_data['nouns']
+        })
+    else:
+        # Ensure non-dictionary results are serialized appropriately
+        processed_results.append({
+            'text': str(result)  # Ensure it's serialized as a string
+        })
+            
+        # Log processed results to debug serialization issues
+        logger.info(f"Processed results: {processed_results}")
+        
         # Return JSON-serializable response
         return create_standard_response({
             'query': processed_query_data,
