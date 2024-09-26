@@ -44,9 +44,12 @@ REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 def process_user_input(user_input: str) -> str:
     """Extract relevant keywords and entities from user input using SpaCy."""
     doc = nlp(user_input)
-    entities = [ent.text for ent in doc.ents]
-    keywords = [token.text for token in doc if token.pos_ in ['NOUN', 'PROPN', 'ADJ']]
-    return ' '.join(set(entities + keywords))
+
+    # Convert to basic types (strings and lists)
+    entities = [ent.text for ent in doc.ents]  # list of strings
+    keywords = [token.text for token in doc if token.pos_ in ['NOUN', 'PROPN', 'ADJ']]  # list of strings
+
+    return ' '.join(set(entities + keywords))  # return as string, which is JSON-serializable
 
 # Generate a dynamic response
 def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) -> str:
@@ -151,7 +154,8 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
             title = item['snippet']['title']
             description = item['snippet']['description']
             video_url = f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-            summary = next(nlp(description).sents).text  # Get first sentence as summary
+            # Extract first sentence of description as summary (convert spaCy Span to string)
+            summary = str(next(nlp(description).sents))  # Get first sentence as summary (convert to string)
 
             results.append({
                 'source': 'YouTube',
@@ -181,7 +185,8 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
             title = article['title']
             content = article['content'] or article['description']
             article_url = article['url']
-            summary = next(nlp(content).sents).text  # Get first sentence as summary
+            # Extract first sentence of description as summary (convert spaCy Span to string)
+            summary = str(next(nlp(description).sents))  # Get first sentence as summary (convert to string)
 
             results.append({
                 'source': 'NewsAPI',
@@ -211,7 +216,8 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
             title = item['title']
             snippet = item['snippet']
             link = item['link']
-            summary = next(nlp(snippet).sents).text  # Get first sentence as summary
+            # Extract first sentence of description as summary (convert spaCy Span to string)
+            summary = str(next(nlp(description).sents))  # Get first sentence as summary (convert to string)
 
             results.append({
                 'source': 'Google',
@@ -267,7 +273,7 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
             username = author['username'] if author else "Unknown"
             
             # Use the first sentence as a summary (or use full text if short)
-            summary = next(nlp(tweet_text).sents).text if len(tweet_text) > 100 else tweet_text
+            summary = str(next(nlp(tweet_text).sents)) if len(tweet_text) > 100 else tweet_text
 
             results.append({
                 'source': 'Twitter',
@@ -311,7 +317,14 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
             title = post['data']['title']
             selftext = post['data']['selftext']
             url = f"https://www.reddit.com{post['data']['permalink']}"
-            summary = nlp(selftext[:500]).sents.__next__().text if selftext else title  # Get first sentence of selftext or use title
+            if selftext:
+        # Process the first 500 characters of selftext
+                doc = nlp(selftext[:500])
+        # Get the first sentence and convert it to a string
+                summary = str(next(doc.sents))
+            else:
+        # If no selftext, use the title as the summary
+                summary = str(title)
 
             results.append({
                 'source': 'Reddit',
