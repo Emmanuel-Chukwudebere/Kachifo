@@ -106,7 +106,6 @@ def log_response_info(response):
     logger.debug(f'Headers: {response.headers}')
     return response
 
-
 # Rate limiting (with added headers to indicate remaining quota)
 def rate_limit(func):
     @wraps(func)
@@ -123,6 +122,10 @@ def rate_limit(func):
         logger.info(f"Remaining global requests: {remaining_requests - 1}")
         
         response = func(*args, **kwargs)
+        if isinstance(response, tuple):
+            response, status_code = response
+            response = jsonify(response), status_code
+        
         response.headers['X-RateLimit-Remaining'] = remaining_requests - 1
         response.headers['X-RateLimit-Limit'] = 60  # Add this header to show the total limit
         return response
