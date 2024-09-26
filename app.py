@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify, render_template, current_app
+from flask import Flask, request, jsonify, render_template, current_app, Response, make_response
 from flask_sqlalchemy import SQLAlchemy
 from flask_caching import Cache
 from flask_talisman import Talisman
@@ -124,10 +124,11 @@ def rate_limit(func):
         else:
             data, status_code = response, 200
         
-        if not isinstance(data, str):
+        if not isinstance(data, (str, bytes)):
             data = json.dumps(data)  # Ensure data is a JSON string
         
-        response = Response(data, status=status_code, mimetype='application/json')
+        response = make_response(data, status_code)
+        response.headers['Content-Type'] = 'application/json'
         response.headers['X-RateLimit-Remaining'] = remaining_requests - 1
         response.headers['X-RateLimit-Limit'] = 60
         return response
