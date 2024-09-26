@@ -118,13 +118,18 @@ def rate_limit(func):
         response = func(*args, **kwargs)
         
         if isinstance(response, tuple):
-            response, status_code = response
-            response = jsonify(response), status_code
-        elif not isinstance(response, tuple):
-            response = jsonify(response)
+            data, status_code = response
+        elif isinstance(response, Response):
+            return response  # If it's already a Response object, return it as is
+        else:
+            data, status_code = response, 200
         
-        response[0].headers['X-RateLimit-Remaining'] = remaining_requests - 1
-        response[0].headers['X-RateLimit-Limit'] = 60
+        if not isinstance(data, str):
+            data = json.dumps(data)  # Ensure data is a JSON string
+        
+        response = Response(data, status=status_code, mimetype='application/json')
+        response.headers['X-RateLimit-Remaining'] = remaining_requests - 1
+        response.headers['X-RateLimit-Limit'] = 60
         return response
     return wrapper
 
