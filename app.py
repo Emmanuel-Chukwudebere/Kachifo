@@ -101,6 +101,15 @@ def log_response_info(response):
     return response
 
 # Rate limiting
+def create_standard_response(data, status_code=200, message=None):
+    response = {
+        "status": "success" if status_code < 400 else "error",
+        "data": data
+    }
+    if message:
+        response["message"] = message
+    return jsonify(response), status_code
+
 def rate_limit(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -110,7 +119,7 @@ def rate_limit(func):
             remaining_requests = 60  # Set a higher limit for global usage
         elif remaining_requests <= 0:
             logger.warning("Global rate limit exceeded")
-            return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
+            return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
         
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
         
@@ -119,16 +128,10 @@ def rate_limit(func):
         
         if isinstance(response, tuple):
             data, status_code = response
-        elif isinstance(response, Response):
-            return response  # If it's already a Response object, return it as is
         else:
             data, status_code = response, 200
         
-        if not isinstance(data, (str, bytes)):
-            data = json.dumps(data)  # Ensure data is a JSON string
-        
-        response = make_response(data, status_code)
-        response.headers['Content-Type'] = 'application/json'
+        response = make_response(jsonify(data), status_code)
         response.headers['X-RateLimit-Remaining'] = remaining_requests - 1
         response.headers['X-RateLimit-Limit'] = 60
         return response
@@ -156,17 +159,17 @@ def process_query_with_spacy(query):
 @app.errorhandler(HTTPException)
 def handle_http_error(e):
     logger.error(f"HTTP error occurred: {e.description} - Code: {e.code}")
-    return jsonify({'error': 'Something went wrong! Please check your request and try again.'}), e.code
+    return create_standard_response(None, e.code, "Something went wrong! Please check your request and try again.")
 
 @app.errorhandler(SQLAlchemyError)
 def handle_database_error(e):
     logger.error(f"Database error: {str(e)}")
-    return jsonify({'error': 'Database error occurred. Please try again later.'}), 500
+    return create_standard_response(None, 500, "Database error occurred. Please try again later.")
 
 @app.errorhandler(Exception)
 def handle_unexpected_error(e):
     logger.critical(f"Unexpected error: {str(e)}", exc_info=True)
-    return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
+    return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
 # Routes
 @app.route('/')
@@ -218,33 +221,16 @@ def search_trends():
                     'nouns': processed_result_data['nouns']
                 })
 
-                # Store the result in the database
-                new_trend = Trend(
-                    query=query,
-                    source=result.get('source', ''),
-                    title=result.get('title', ''),
-                    summary=result.get('summary', ''),
-                    url=result.get('url', '')
-                )
-                db.session.add(new_trend)
-
-        # Store the user's query along with spaCy-extracted data
-        new_query = UserQuery(
-            query=query,
-            entities=str(processed_query_data['entities']),
-            verbs=str(processed_query_data['verbs']),
-            nouns=str(processed_query_data['nouns'])
-        )
-        db.session.add(new_query)
-        db.session.commit()
-
-        return jsonify(processed_results)
+        return create_standard_response({
+            'query': query,
+            'results': processed_results
+        })
     except BadRequest as e:
-        current_app.logger.error(f"Bad request: {str(e)}")
-        return jsonify({'error': str(e)}), 400
+        logger.error(f"Bad request: {str(e)}")
+        return create_standard_response(None, 400, str(e))
     except Exception as e:
-        current_app.logger.error(f"Error while processing search: {str(e)}", exc_info=True)
-        return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
+        logger.error(f"Error while processing search: {str(e)}", exc_info=True)
+        return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
 @app.route('/recent_searches', methods=['GET'])
 def recent_searches():
@@ -310,14 +296,22 @@ def process_query():
                     'verbs': processed_result_data['verbs'],
                     'nouns': processed_result_data['nouns']
                 })
+            elif isinstance(result, str):
+                processed_result_data = process_query_with_spacy(result)
+                processed_results.append({
+                    'text': result,
+                    'entities': processed_result_data['entities'],
+                    'verbs': processed_result_data['verbs'],
+                    'nouns': processed_result_data['nouns']
+                })
 
-        return jsonify({
+        return create_standard_response({
             'query': processed_query_data,
             'results': processed_results
         })
     except Exception as e:
-        current_app.logger.error(f"Error processing query: {str(e)}", exc_info=True)
-        return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
+        logger.error(f"Error processing query: {str(e)}", exc_info=True)
+        return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
 # Start the app
 if __name__ == '__main__':
