@@ -262,16 +262,17 @@ def process_query():
             query = request.json.get('q')
         else:
             query = request.form.get('q')
+
         if not query:
             current_app.logger.warning(f"Query is missing. Headers: {request.headers}, Data: {request.data}")
-            return create_standard_response(None, 400, 'Query is required')
-        
+            return jsonify({'error': 'Query is required'}), 400
+
         query = sanitize_input(query)
         current_app.logger.info(f"Processing query: {query}")
-        
+
         # Process the user's search query with spaCy
         processed_query_data = process_query_with_spacy(query)
-        
+
         # Store the user's query with spaCy data
         new_query = UserQuery(
             query=query,
@@ -281,19 +282,36 @@ def process_query():
         )
         db.session.add(new_query)
         db.session.commit()
-        
-        # Fetch trending topics and generate dynamic response
-        response_text = fetch_trending_topics(query)
-        
+
+        # Fetch trending topics or perform search
+        results = fetch_trending_topics(query)
+        processed_results = []
+        for result in results:
+            if isinstance(result, dict):
+                result_text = f"{result.get('title', '')} {result.get('summary', '')}"
+                processed_result_data = process_query_with_spacy(result_text)
+                processed_results.append({
+                    'source': result.get('source', ''),
+                    'title': result.get('title', ''),
+                    'summary': result.get('summary', ''),
+                    'url': result.get('url', ''),
+                    'entities': processed_result_data['entities'],
+                    'verbs': processed_result_data['verbs'],
+                    'nouns': processed_result_data['nouns']
+                })
+            elif isinstance(result, str):
+                processed_result_data = process_query_with_spacy(result)
+                processed_results.append({
+                    'text': result,
+                    'entities': processed_result_data['entities'],
+                    'verbs': processed_result_data['verbs'],
+                    'nouns': processed_result_data['nouns']
+                })
+
         return create_standard_response({
-            'query': {
-                'text': str(query),
-                'entities': [str(e) for e in processed_query_data['entities']],
-                'verbs': [str(v) for v in processed_query_data['verbs']],
-                'nouns': [str(n) for n in processed_query_data['nouns']]
-            },
-            'response': response_text
-        })
+            'query': processed_query_data,
+            'results': processed_results
+        }, 200, "Query processed successfully")  # Added status_code and message
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
