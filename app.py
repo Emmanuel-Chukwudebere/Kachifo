@@ -101,15 +101,6 @@ def log_response_info(response):
     return response
 
 # Rate limiting
-def create_standard_response(data, status_code=200, message=None):
-    response = {
-        "status": "success" if status_code < 400 else "error",
-        "data": data
-    }
-    if message:
-        response["message"] = message
-    return jsonify(response), status_code
-
 def rate_limit(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -122,16 +113,16 @@ def rate_limit(func):
             return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
         
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
-        
         logger.info(f"Remaining global requests: {remaining_requests - 1}")
+        
         response = func(*args, **kwargs)
         
         if isinstance(response, tuple):
             data, status_code = response
-        else:
-            data, status_code = response, 200
+            response = make_response(jsonify(data), status_code)
+        elif not isinstance(response, Response):
+            response = make_response(jsonify(response))
         
-        response = make_response(jsonify(data), status_code)
         response.headers['X-RateLimit-Remaining'] = remaining_requests - 1
         response.headers['X-RateLimit-Limit'] = 60
         return response
