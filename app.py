@@ -87,6 +87,14 @@ def setup_logging():
 setup_logging()
 logger = logging.getLogger(__name__)
 
+def create_standard_response(data, status_code, message):
+    response = {
+        "data": data,
+        "status": status_code,
+        "message": message
+    }
+    return jsonify(response), status_code
+
 # Request logging middleware
 @app.before_request
 def log_request_info():
