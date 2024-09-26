@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify, render_template, current_app, Response, make_response
+from flask import Flask, request, jsonify, render_template, Response, make_response, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_caching import Cache
 from flask_talisman import Talisman
@@ -66,17 +66,17 @@ def setup_logging():
     max_log_size = 10 * 1024 * 1024  # 10 MB
     backup_count = 5
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
+
     file_handler = RotatingFileHandler(log_file, maxBytes=max_log_size, backupCount=backup_count)
     file_handler.setFormatter(formatter)
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
-    
+
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
-    
+
     for logger_name in ('werkzeug', 'sqlalchemy.engine'):
         logger = logging.getLogger(logger_name)
         logger.handlers = []
@@ -87,6 +87,7 @@ def setup_logging():
 setup_logging()
 logger = logging.getLogger(__name__)
 
+# Helper function for standardized response
 def create_standard_response(data, status_code, message):
     response = {
         "data": data,
@@ -95,7 +96,7 @@ def create_standard_response(data, status_code, message):
     }
     return jsonify(response), status_code
 
-# Request logging middleware
+# Middleware for logging requests and responses
 @app.before_request
 def log_request_info():
     logger.info(f'Request: {request.method} {request.url}')
@@ -119,22 +120,21 @@ def rate_limit(func):
         elif remaining_requests <= 0:
             logger.warning("Global rate limit exceeded")
             return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
-        
+
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
         logger.info(f"Remaining global requests: {remaining_requests - 1}")
-        
+
         response = func(*args, **kwargs)
-        
+
         if isinstance(response, tuple):
             data, status_code = response
             response = make_response(jsonify(data), status_code)
         elif isinstance(response, Response):
-            # If it's already a Response object, we don't need to modify it
-            pass
+            # It's already a Response object, so return it directly
+            return response
         else:
-            # If it's neither a tuple nor a Response, assume it's JSON-serializable data
             response = make_response(jsonify(response), 200)
-        
+
         response.headers['X-RateLimit-Remaining'] = str(remaining_requests - 1)
         response.headers['X-RateLimit-Limit'] = '60'
         return response
@@ -184,50 +184,32 @@ def home():
 @rate_limit
 def search_trends():
     try:
-        if request.method == 'GET':
-            query = request.args.get('q')
-        elif request.method == 'POST':
-            if request.is_json:
-                query = request.json.get('q')
-            else:
-                query = request.form.get('q')
-        else:
-            raise BadRequest("Unsupported HTTP method")
-
+        query = request.args.get('q') if request.method == 'GET' else request.form.get('q')
         if not query:
-            current_app.logger.warning(f"Search query is missing. Method: {request.method}, Headers: {request.headers}, Data: {request.data}")
-            return jsonify({'error': 'Query parameter "q" is required'}), 400
+            raise BadRequest("Query parameter 'q' is required")
 
         query = sanitize_input(query)
-        current_app.logger.info(f"Processing search query: {query}")
-
-        # Process the user's search query with spaCy
-        processed_query_data = process_query_with_spacy(query)
+        logger.info(f"Processing search query: {query}")
 
         # Fetch trending topics (results from external APIs)
         results = fetch_trending_topics(query)
-        current_app.logger.info(f"Search results for '{query}': {len(results)} items found")
 
         # Process the fetched results with spaCy
         processed_results = []
         for result in results:
-            if isinstance(result, dict):
-                result_text = f"{result.get('title', '')} {result.get('summary', '')}"
-                processed_result_data = process_query_with_spacy(result_text)
-                processed_results.append({
-                    'source': result.get('source', ''),
-                    'title': result.get('title', ''),
-                    'summary': result.get('summary', ''),
-                    'url': result.get('url', ''),
-                    'entities': processed_result_data['entities'],
-                    'verbs': processed_result_data['verbs'],
-                    'nouns': processed_result_data['nouns']
-                })
+            result_text = f"{result.get('title', '')} {result.get('summary', '')}"
+            processed_result_data = process_query_with_spacy(result_text)
+            processed_results.append({
+                'source': result.get('source', ''),
+                'title': result.get('title', ''),
+                'summary': result.get('summary', ''),
+                'url': result.get('url', ''),
+                'entities': processed_result_data['entities'],
+                'verbs': processed_result_data['verbs'],
+                'nouns': processed_result_data['nouns']
+            })
 
-        return create_standard_response({
-            'query': query,
-            'results': processed_results
-        })
+        return create_standard_response({'query': query, 'results': processed_results}, 200, "Query processed successfully")
     except BadRequest as e:
         logger.error(f"Bad request: {str(e)}")
         return create_standard_response(None, 400, str(e))
@@ -249,26 +231,23 @@ def recent_searches():
                 'verbs': processed_query_data['verbs'],
                 'nouns': processed_query_data['nouns']
             })
-        return jsonify(recent_searches_processed)
+        return create_standard_response(recent_searches_processed, 200, "Recent searches retrieved successfully")
     except Exception as e:
-        current_app.logger.error(f"Error fetching recent searches: {str(e)}", exc_info=True)
-        return jsonify({'error': 'An error occurred while fetching recent searches'}), 500
-
+        logger.error(f"Error fetching recent searches: {str(e)}", exc_info=True)
+        return create_standard_response(None, 500, "An error occurred while fetching recent searches")
+        
 @app.route('/process-query', methods=['POST'])
 @rate_limit
 def process_query():
     try:
-        if request.is_json:
-            query = request.json.get('q')
-        else:
-            query = request.form.get('q')
+        query = request.json.get('q') if request.is_json else request.form.get('q')
 
         if not query:
-            current_app.logger.warning(f"Query is missing. Headers: {request.headers}, Data: {request.data}")
-            return jsonify({'error': 'Query is required'}), 400
+            logger.warning(f"Query is missing. Headers: {request.headers}, Data: {request.get_data()}")
+            return create_standard_response(None, 400, "Query is required")
 
         query = sanitize_input(query)
-        current_app.logger.info(f"Processing query: {query}")
+        logger.info(f"Processing query: {query}")
 
         # Process the user's search query with spaCy
         processed_query_data = process_query_with_spacy(query)
@@ -287,36 +266,26 @@ def process_query():
         results = fetch_trending_topics(query)
         processed_results = []
         for result in results:
-            if isinstance(result, dict):
-                result_text = f"{result.get('title', '')} {result.get('summary', '')}"
-                processed_result_data = process_query_with_spacy(result_text)
-                processed_results.append({
-                    'source': result.get('source', ''),
-                    'title': result.get('title', ''),
-                    'summary': result.get('summary', ''),
-                    'url': result.get('url', ''),
-                    'entities': processed_result_data['entities'],
-                    'verbs': processed_result_data['verbs'],
-                    'nouns': processed_result_data['nouns']
-                })
-            elif isinstance(result, str):
-                processed_result_data = process_query_with_spacy(result)
-                processed_results.append({
-                    'text': result,
-                    'entities': processed_result_data['entities'],
-                    'verbs': processed_result_data['verbs'],
-                    'nouns': processed_result_data['nouns']
-                })
+            result_text = f"{result.get('title', '')} {result.get('summary', '')}"
+            processed_result_data = process_query_with_spacy(result_text)
+            processed_results.append({
+                'source': result.get('source', ''),
+                'title': result.get('title', ''),
+                'summary': result.get('summary', ''),
+                'url': result.get('url', ''),
+                'entities': processed_result_data['entities'],
+                'verbs': processed_result_data['verbs'],
+                'nouns': processed_result_data['nouns']
+            })
 
         return create_standard_response({
             'query': processed_query_data,
             'results': processed_results
-        }, 200, "Query processed successfully")  # Added status_code and message
+        }, 200, "Query processed successfully")
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
-# Start the app
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
