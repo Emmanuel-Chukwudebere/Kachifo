@@ -128,11 +128,15 @@ def rate_limit(func):
         if isinstance(response, tuple):
             data, status_code = response
             response = make_response(jsonify(data), status_code)
-        elif not isinstance(response, Response):
-            response = make_response(jsonify(response))
+        elif isinstance(response, Response):
+            # If it's already a Response object, we don't need to modify it
+            pass
+        else:
+            # If it's neither a tuple nor a Response, assume it's JSON-serializable data
+            response = make_response(jsonify(response), 200)
         
-        response.headers['X-RateLimit-Remaining'] = remaining_requests - 1
-        response.headers['X-RateLimit-Limit'] = 60
+        response.headers['X-RateLimit-Remaining'] = str(remaining_requests - 1)
+        response.headers['X-RateLimit-Limit'] = '60'
         return response
     return wrapper
 
@@ -307,7 +311,7 @@ def process_query():
         return create_standard_response({
             'query': processed_query_data,
             'results': processed_results
-        })
+        }, 200, "Query processed successfully")  # Added status_code and message
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
