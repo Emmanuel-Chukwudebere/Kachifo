@@ -186,7 +186,7 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
             content = article['content'] or article['description']
             article_url = article['url']
             # Extract first sentence of description as summary (convert spaCy Span to string)
-            summary = str(next(nlp(description).sents))  # Get first sentence as summary (convert to string)
+            summary = str(next(nlp(content).sents))  # Get first sentence as summary (convert to string)
 
             results.append({
                 'source': 'NewsAPI',
@@ -217,7 +217,7 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
             snippet = item['snippet']
             link = item['link']
             # Extract first sentence of description as summary (convert spaCy Span to string)
-            summary = str(next(nlp(description).sents))  # Get first sentence as summary (convert to string)
+            summary = str(next(nlp(snippet).sents))  # Get first sentence as summary (convert to string)
 
             results.append({
                 'source': 'Google',
