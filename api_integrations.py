@@ -2,12 +2,12 @@ import os
 import requests
 import logging
 from requests.exceptions import RequestException
+from requests_oauthlib import OAuth1
 from cachetools import cached, TTLCache
-import re
 from dotenv import load_dotenv
 import spacy
 from typing import List, Dict, Any
-import random
+import re
 
 # Load environment variables
 load_dotenv()
@@ -28,80 +28,77 @@ except OSError:
 cache = TTLCache(maxsize=1000, ttl=3600)
 
 # API keys from environment variables
-def get_env_var(key: str) -> str:
-    value = os.getenv(key)
-    if not value:
-        logger.error(f"Environment variable {key} is missing.")
-        raise ValueError(f"{key} is required but not set.")
-    return value
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
+TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
+TWITTER_API_SECRET_KEY = os.getenv("TWITTER_API_SECRET_KEY")
+TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+TWITTER_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
+REDDIT_SECRET = os.getenv("REDDIT_SECRET")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 
-YOUTUBE_API_KEY = get_env_var('YOUTUBE_API_KEY')
-GOOGLE_API_KEY = get_env_var('GOOGLE_API_KEY')
-NEWSAPI_KEY = get_env_var('NEWSAPI_KEY')
-TWITTER_BEARER_TOKEN = get_env_var('TWITTER_BEARER_TOKEN')
-REDDIT_CLIENT_ID = get_env_var('REDDIT_CLIENT_ID')
-REDDIT_SECRET = get_env_var('REDDIT_SECRET')
-REDDIT_USER_AGENT = get_env_var('REDDIT_USER_AGENT')
-
+# Process user input with SpaCy
 def process_user_input(user_input: str) -> str:
-    """Process user input using spaCy NLP."""
+    """Extract relevant keywords and entities from user input using SpaCy."""
     doc = nlp(user_input)
     entities = [ent.text for ent in doc.ents]
     keywords = [token.text for token in doc if token.pos_ in ['NOUN', 'PROPN', 'ADJ']]
     return ' '.join(set(entities + keywords))
 
+# Generate a dynamic response
 def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) -> str:
-    """Generate a dynamic response using spaCy analysis of user input and results."""
+    """Generate a dynamic response using SpaCy analysis of user input and API results."""
     doc = nlp(user_input)
-    
-    # Extract key information from user input
     main_topic = next((token.text for token in doc if token.pos_ in ['NOUN', 'PROPN']), "this topic")
     sentiment = doc.sentiment
-    
-    # Generate introduction based on sentiment and main topic
+
+    # Generate introduction based on sentiment
     if sentiment > 0.5:
         intro = f"Great choice! I found some exciting trends about {main_topic}:"
     elif sentiment < -0.5:
         intro = f"I understand your concern about {main_topic}. Here's what's trending:"
     else:
         intro = f"Here's what I discovered about {main_topic}:"
-    
+
     response = f"{intro}\n\n"
-    
+
     for result in results:
         response += f"📌 {result['source']}: {result['title']}\n"
         response += f"   {result['summary']}\n"
         response += f"   More at: {result['url']}\n\n"
-    
-    # Generate conclusion based on results
+
+    # Generate a conclusion
     if len(results) > 5:
         conclusion = f"Wow, there's a lot of buzz around {main_topic}! Which aspect interests you most?"
     else:
         conclusion = f"These are the top trends for {main_topic}. Would you like to explore any specific area further?"
-    
+
     response += conclusion
-    
     return response
 
+# Cache API results
 @cached(cache)
 def fetch_trending_topics(user_input: str) -> str:
     try:
         logger.info(f"Processing user input: {user_input}")
         query = process_user_input(user_input)
         logger.info(f"Extracted query: {query}")
-        
+
         results = []
         results.extend(fetch_youtube_trends(query))
         results.extend(fetch_news_trends(query))
         results.extend(fetch_twitter_trends(query))
         results.extend(fetch_reddit_trends(query))
-        
+
         # Limit to first 10 results
         results = results[:10]
-        
+
         if not results:
             return f"I couldn't find any relevant trends about {query} at the moment. Could you try rephrasing your query or exploring a different topic?"
-        
+
         # Generate dynamic response
         return generate_dynamic_response(user_input, results)
 
@@ -109,8 +106,7 @@ def fetch_trending_topics(user_input: str) -> str:
         logger.error(f"Error fetching trending topics: {str(e)}", exc_info=True)
         return f"I apologize, but I encountered an unexpected issue while fetching trends about {query}. Could we try again with a different query?"
 
-# ... (keep existing YouTube, News, and Twitter API functions)
-
+# Fetch YouTube trends
 def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending YouTube videos matching the query."""
     try:
@@ -125,22 +121,22 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
             title = item['snippet']['title']
             description = item['snippet']['description']
             video_url = f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-            
-            summary = nlp(description).sents.__next__().text  # Get first sentence as summary
-            
+            summary = next(nlp(description).sents).text  # Get first sentence as summary
+
             results.append({
                 'source': 'YouTube',
                 'title': title,
                 'summary': summary,
                 'url': video_url
             })
-        
+
         logger.info(f"Fetched {len(results)} YouTube trends.")
         return results
     except RequestException as e:
         logger.error(f"Error fetching YouTube trends: {str(e)}")
         return []
 
+# Fetch News trends
 def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending news articles matching the query."""
     try:
@@ -155,9 +151,8 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
             title = article['title']
             content = article['content'] or article['description']
             article_url = article['url']
-            
-            summary = nlp(content).sents.__next__().text  # Get first sentence as summary
-            
+            summary = next(nlp(content).sents).text  # Get first sentence as summary
+
             results.append({
                 'source': 'NewsAPI',
                 'title': title,
@@ -171,6 +166,7 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching news trends: {str(e)}")
         return []
 
+# Fetch Google Search trends
 def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch Google Custom Search results matching the query."""
     try:
@@ -185,9 +181,8 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
             title = item['title']
             snippet = item['snippet']
             link = item['link']
-            
-            summary = nlp(snippet).sents.__next__().text  # Get first sentence as summary
-            
+            summary = next(nlp(snippet).sents).text  # Get first sentence as summary
+
             results.append({
                 'source': 'Google',
                 'title': title,
@@ -201,27 +196,49 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching Google trends: {str(e)}")
         return []
 
+# Fetch Twitter trends using OAuth1.0a for authentication
 def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
-    """Fetch trending tweets matching the query."""
+    """Fetch trending tweets matching the query using OAuth1."""
     try:
         logger.info(f"Fetching Twitter trends for query: {query}")
-        search_url = f"https://api.twitter.com/2/tweets/search/recent?query={query}&tweet.fields=text,author_id,created_at&expansions=author_id&user.fields=username"
-        headers = {
-            "Authorization": f"Bearer {TWITTER_BEARER_TOKEN}",
-            "User-Agent": "v2RecentSearchPython"
+        
+        # Twitter API v2 search endpoint
+        search_url = "https://api.twitter.com/2/tweets/search/recent"
+        
+        # Set up OAuth1 for signing requests with user credentials
+        auth = OAuth1(
+            client_key=TWITTER_API_KEY,
+            client_secret=TWITTER_API_SECRET_KEY,
+            resource_owner_key=TWITTER_ACCESS_TOKEN,
+            resource_owner_secret=TWITTER_ACCESS_TOKEN_SECRET
+        )
+
+        # Parameters for the API request
+        params = {
+            'query': query,
+            'tweet.fields': 'text,author_id,created_at',
+            'expansions': 'author_id',
+            'user.fields': 'username'
         }
-        response = requests.get(search_url, headers=headers, timeout=10)
-        response.raise_for_status()
+        
+        # Make the request to Twitter API
+        response = requests.get(search_url, params=params, auth=auth)
+        response.raise_for_status()  # Raise an error for bad responses
+
         data = response.json()
 
         results = []
         for tweet in data.get('data', []):
             tweet_text = tweet['text']
-            author = next((user for user in data['includes']['users'] if user['id'] == tweet['author_id']), None)
-            username = author['username'] if author else 'Unknown'
+            author_id = tweet['author_id']
             
-            summary = nlp(tweet_text).sents.__next__().text  # Get first sentence as summary
+            # Find the author details from the expansions field
+            author = next((user for user in data.get('includes', {}).get('users', []) if user['id'] == author_id), None)
+            username = author['username'] if author else "Unknown"
             
+            # Use the first sentence as a summary (or use full text if short)
+            summary = next(nlp(tweet_text).sents).text if len(tweet_text) > 100 else tweet_text
+
             results.append({
                 'source': 'Twitter',
                 'title': f"Tweet by @{username}",
@@ -231,10 +248,12 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
 
         logger.info(f"Fetched {len(results)} Twitter trends.")
         return results
+
     except RequestException as e:
         logger.error(f"Error fetching Twitter trends: {str(e)}")
         return []
 
+# Fetch Reddit trends
 def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending Reddit posts matching the query."""
     try:
@@ -262,9 +281,8 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
             title = post['data']['title']
             selftext = post['data']['selftext']
             url = f"https://www.reddit.com{post['data']['permalink']}"
-            
             summary = nlp(selftext[:500]).sents.__next__().text if selftext else title  # Get first sentence of selftext or use title
-            
+
             results.append({
                 'source': 'Reddit',
                 'title': title,
@@ -284,6 +302,7 @@ def get_trends(user_input: str) -> str:
     logger.info(f"Sanitized input: {sanitized_input}")
     return fetch_trending_topics(sanitized_input)
 
+# Entry point for the script
 if __name__ == "__main__":
     user_query = input("What trends would you like to explore today? ")
     trends = get_trends(user_query)
