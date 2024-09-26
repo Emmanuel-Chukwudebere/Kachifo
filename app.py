@@ -1,19 +1,16 @@
 import os
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_caching import Cache
 from flask_talisman import Talisman
-from flask import current_app
 from functools import wraps
 import logging
 from logging.handlers import RotatingFileHandler
-import time
 import re
 from api_integrations import fetch_trending_topics
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import HTTPException, BadRequest
 from sqlalchemy.exc import SQLAlchemyError
-from werkzeug.exceptions import BadRequest
-import spacy  # Import spaCy
+import spacy
 
 # Initialize spaCy model
 nlp = spacy.load('en_core_web_sm')
@@ -21,7 +18,7 @@ nlp = spacy.load('en_core_web_sm')
 # Initialize Flask app
 app = Flask(__name__)
 
-# Security: Use Flask-Talisman to enforce HTTPS, set secure headers (Content Security Policy)
+# Security: Use Flask-Talisman to enforce HTTPS, set secure headers
 Talisman(app, content_security_policy={
     'default-src': ["'self'", 'https:'],
     'script-src': ["'self'", 'https:'],
@@ -30,7 +27,7 @@ Talisman(app, content_security_policy={
     'connect-src': ["'self'", 'https:']
 })
 
-# Database configuration (Production-ready: Add connection pooling)
+# Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///production.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
@@ -43,7 +40,6 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 app.config['CACHE_TYPE'] = 'simple'
 app.config['CACHE_DEFAULT_TIMEOUT'] = 300
 cache = Cache(app)
-
 db = SQLAlchemy(app)
 
 # Models
@@ -58,12 +54,12 @@ class Trend(db.Model):
 class UserQuery(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     query = db.Column(db.String(255), nullable=False)
-    entities = db.Column(db.Text, nullable=True)  # Store extracted entities
-    verbs = db.Column(db.Text, nullable=True)  # Store extracted verbs
-    nouns = db.Column(db.Text, nullable=True)  # Store extracted nouns
+    entities = db.Column(db.Text, nullable=True)
+    verbs = db.Column(db.Text, nullable=True)
+    nouns = db.Column(db.Text, nullable=True)
     timestamp = db.Column(db.DateTime, default=db.func.now())
 
-# Advanced logging setup (Adjusting for production)
+# Advanced logging setup
 def setup_logging():
     log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
     log_file = os.environ.get('LOG_FILE', 'kachifo.log')
@@ -73,7 +69,6 @@ def setup_logging():
     
     file_handler = RotatingFileHandler(log_file, maxBytes=max_log_size, backupCount=backup_count)
     file_handler.setFormatter(formatter)
-    
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
     
@@ -82,7 +77,6 @@ def setup_logging():
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
     
-    # Set Flask and SQLAlchemy loggers to use the same handlers
     for logger_name in ('werkzeug', 'sqlalchemy.engine'):
         logger = logging.getLogger(logger_name)
         logger.handlers = []
@@ -106,7 +100,7 @@ def log_response_info(response):
     logger.debug(f'Headers: {response.headers}')
     return response
 
-# Rate limiting (with added headers to indicate remaining quota)
+# Rate limiting
 def rate_limit(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -119,15 +113,18 @@ def rate_limit(func):
             return jsonify({'error': 'Rate limit exceeded. Please try again later.'}), 429
         
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
-        logger.info(f"Remaining global requests: {remaining_requests - 1}")
         
+        logger.info(f"Remaining global requests: {remaining_requests - 1}")
         response = func(*args, **kwargs)
+        
         if isinstance(response, tuple):
             response, status_code = response
             response = jsonify(response), status_code
+        elif not isinstance(response, tuple):
+            response = jsonify(response)
         
-        response.headers['X-RateLimit-Remaining'] = remaining_requests - 1
-        response.headers['X-RateLimit-Limit'] = 60  # Add this header to show the total limit
+        response[0].headers['X-RateLimit-Remaining'] = remaining_requests - 1
+        response[0].headers['X-RateLimit-Limit'] = 60
         return response
     return wrapper
 
@@ -140,19 +137,16 @@ def sanitize_input(query):
 # Extract useful information from spaCy
 def process_query_with_spacy(query):
     doc = nlp(query)
-    
-    # Extract useful information: entities, verbs, nouns
     entities = [(ent.text, ent.label_) for ent in doc.ents]
     nouns = [chunk.text for chunk in doc.noun_chunks]
     verbs = [token.lemma_ for token in doc if token.pos_ == 'VERB']
-
     return {
         'entities': entities,
         'nouns': nouns,
         'verbs': verbs
     }
 
-# Error handlers (with user-friendly error messages)
+# Error handlers
 @app.errorhandler(HTTPException)
 def handle_http_error(e):
     logger.error(f"HTTP error occurred: {e.description} - Code: {e.code}")
@@ -205,29 +199,28 @@ def search_trends():
         # Process the fetched results with spaCy
         processed_results = []
         for result in results:
-            result_text = f"{result['title']} {result['summary']}"  # Combining title and summary for linguistic analysis
-            processed_result_data = process_query_with_spacy(result_text)  # Apply spaCy to the result text
-            
-            # Store processed data alongside original result
-            processed_results.append({
-                'source': result['source'],
-                'title': result['title'],
-                'summary': result['summary'],
-                'url': result['url'],
-                'entities': processed_result_data['entities'],
-                'verbs': processed_result_data['verbs'],
-                'nouns': processed_result_data['nouns']
-            })
+            if isinstance(result, dict):
+                result_text = f"{result.get('title', '')} {result.get('summary', '')}"
+                processed_result_data = process_query_with_spacy(result_text)
+                processed_results.append({
+                    'source': result.get('source', ''),
+                    'title': result.get('title', ''),
+                    'summary': result.get('summary', ''),
+                    'url': result.get('url', ''),
+                    'entities': processed_result_data['entities'],
+                    'verbs': processed_result_data['verbs'],
+                    'nouns': processed_result_data['nouns']
+                })
 
-            # Store the result in the database
-            new_trend = Trend(
-                query=query,
-                source=result['source'],
-                title=result['title'],
-                summary=result['summary'],
-                url=result['url']
-            )
-            db.session.add(new_trend)
+                # Store the result in the database
+                new_trend = Trend(
+                    query=query,
+                    source=result.get('source', ''),
+                    title=result.get('title', ''),
+                    summary=result.get('summary', ''),
+                    url=result.get('url', '')
+                )
+                db.session.add(new_trend)
 
         # Store the user's query along with spaCy-extracted data
         new_query = UserQuery(
@@ -240,33 +233,28 @@ def search_trends():
         db.session.commit()
 
         return jsonify(processed_results)
-
     except BadRequest as e:
         current_app.logger.error(f"Bad request: {str(e)}")
         return jsonify({'error': str(e)}), 400
     except Exception as e:
         current_app.logger.error(f"Error while processing search: {str(e)}", exc_info=True)
         return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
-        
+
 @app.route('/recent_searches', methods=['GET'])
 def recent_searches():
     try:
-        recent_queries = UserQuery.query.order_by(UserQuery.created_at.desc()).limit(10).all()
-
+        recent_queries = UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
         recent_searches_processed = []
         for query in recent_queries:
             # Process each recent query text with spaCy
             processed_query_data = process_query_with_spacy(query.query)
-
             recent_searches_processed.append({
                 'query': query.query,
                 'entities': processed_query_data['entities'],
                 'verbs': processed_query_data['verbs'],
                 'nouns': processed_query_data['nouns']
             })
-
         return jsonify(recent_searches_processed)
-
     except Exception as e:
         current_app.logger.error(f"Error fetching recent searches: {str(e)}", exc_info=True)
         return jsonify({'error': 'An error occurred while fetching recent searches'}), 500
@@ -302,27 +290,25 @@ def process_query():
 
         # Fetch trending topics or perform search
         results = fetch_trending_topics(query)
-        
         processed_results = []
         for result in results:
-            result_text = f"{result['title']} {result['summary']}"
-            processed_result_data = process_query_with_spacy(result_text)
-
-            processed_results.append({
-                'source': result['source'],
-                'title': result['title'],
-                'summary': result['summary'],
-                'url': result['url'],
-                'entities': processed_result_data['entities'],
-                'verbs': processed_result_data['verbs'],
-                'nouns': processed_result_data['nouns']
-            })
+            if isinstance(result, dict):
+                result_text = f"{result.get('title', '')} {result.get('summary', '')}"
+                processed_result_data = process_query_with_spacy(result_text)
+                processed_results.append({
+                    'source': result.get('source', ''),
+                    'title': result.get('title', ''),
+                    'summary': result.get('summary', ''),
+                    'url': result.get('url', ''),
+                    'entities': processed_result_data['entities'],
+                    'verbs': processed_result_data['verbs'],
+                    'nouns': processed_result_data['nouns']
+                })
 
         return jsonify({
             'query': processed_query_data,
             'results': processed_results
         })
-
     except Exception as e:
         current_app.logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return jsonify({'error': 'An unexpected error occurred. Please try again later.'}), 500
