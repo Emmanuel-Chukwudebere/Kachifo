@@ -116,7 +116,7 @@ def rate_limit(func):
         key = "global_rate_limit"
         remaining_requests = cache.get(key)
         if remaining_requests is None:
-            remaining_requests = 60  # Set a higher limit for global usage
+            remaining_requests = 60
         elif remaining_requests <= 0:
             logger.warning("Global rate limit exceeded")
             return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
@@ -124,14 +124,15 @@ def rate_limit(func):
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
         logger.info(f"Remaining global requests: {remaining_requests - 1}")
 
+        # Execute the original function
         response = func(*args, **kwargs)
 
+        # Ensure response is not serialized again
         if isinstance(response, tuple):
             data, status_code = response
             response = make_response(jsonify(data), status_code)
         elif isinstance(response, Response):
-            # It's already a Response object, so return it directly
-            return response
+            return response  # Directly return Response objects unchanged
         else:
             response = make_response(jsonify(response), 200)
 
@@ -184,15 +185,29 @@ def home():
 @rate_limit
 def search_trends():
     try:
-        query = request.args.get('q') if request.method == 'GET' else request.form.get('q')
+        if request.method == 'GET':
+            query = request.args.get('q')
+        elif request.method == 'POST':
+            if request.is_json:
+                query = request.json.get('q')
+            else:
+                query = request.form.get('q')
+        else:
+            raise BadRequest("Unsupported HTTP method")
+
         if not query:
-            raise BadRequest("Query parameter 'q' is required")
+            current_app.logger.warning(f"Search query is missing. Method: {request.method}, Headers: {request.headers}, Data: {request.data}")
+            return create_standard_response({'error': 'Query parameter "q" is required'}, 400, "Query parameter missing")
 
         query = sanitize_input(query)
-        logger.info(f"Processing search query: {query}")
+        current_app.logger.info(f"Processing search query: {query}")
+
+        # Process the user's search query with spaCy
+        processed_query_data = process_query_with_spacy(query)
 
         # Fetch trending topics (results from external APIs)
         results = fetch_trending_topics(query)
+        current_app.logger.info(f"Search results for '{query}': {len(results)} items found")
 
         # Process the fetched results with spaCy
         processed_results = []
@@ -209,7 +224,11 @@ def search_trends():
                 'nouns': processed_result_data['nouns']
             })
 
-        return create_standard_response({'query': query, 'results': processed_results}, 200, "Query processed successfully")
+        # Ensure we return JSON-serializable data
+        return create_standard_response({
+            'query': query,
+            'results': processed_results
+        }, 200, "Query processed successfully")
     except BadRequest as e:
         logger.error(f"Bad request: {str(e)}")
         return create_standard_response(None, 400, str(e))
@@ -240,14 +259,17 @@ def recent_searches():
 @rate_limit
 def process_query():
     try:
-        query = request.json.get('q') if request.is_json else request.form.get('q')
+        if request.is_json:
+            query = request.json.get('q')
+        else:
+            query = request.form.get('q')
 
         if not query:
-            logger.warning(f"Query is missing. Headers: {request.headers}, Data: {request.get_data()}")
-            return create_standard_response(None, 400, "Query is required")
+            current_app.logger.warning(f"Query is missing. Headers: {request.headers}, Data: {request.data}")
+            return create_standard_response({'error': 'Query is required'}, 400, "Query is required")
 
         query = sanitize_input(query)
-        logger.info(f"Processing query: {query}")
+        current_app.logger.info(f"Processing query: {query}")
 
         # Process the user's search query with spaCy
         processed_query_data = process_query_with_spacy(query)
@@ -278,6 +300,7 @@ def process_query():
                 'nouns': processed_result_data['nouns']
             })
 
+        # Return JSON-serializable response
         return create_standard_response({
             'query': processed_query_data,
             'results': processed_results
