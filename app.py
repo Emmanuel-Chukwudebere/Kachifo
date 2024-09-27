@@ -87,14 +87,14 @@ def setup_logging():
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Helper function for standardized response
+# Helper function for standardized response and ensure create_standard_response always returns a tuple
 def create_standard_response(data, status_code, message):
     response = {
         "data": data,
         "status": status_code,
         "message": message
     }
-    return jsonify(response), status_code
+    return response, status_code
 
 # Middleware for logging requests and responses
 @app.before_request
@@ -120,25 +120,24 @@ def rate_limit(func):
         elif remaining_requests <= 0:
             logger.warning("Global rate limit exceeded")
             return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
-
+        
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
         logger.info(f"Remaining global requests: {remaining_requests - 1}")
 
         # Execute the original function
         response = func(*args, **kwargs)
-
-        # Ensure response is not serialized again
+        
+        # Handle different response types
         if isinstance(response, tuple):
             data, status_code = response
             response = make_response(jsonify(data), status_code)
-        elif isinstance(response, Response):
-            return response  # Directly return Response objects unchanged
-        else:
+        elif not isinstance(response, Response):
             response = make_response(jsonify(response), 200)
 
         response.headers['X-RateLimit-Remaining'] = str(remaining_requests - 1)
         response.headers['X-RateLimit-Limit'] = '60'
         return response
+
     return wrapper
 
 # Input sanitization
@@ -268,7 +267,7 @@ def process_query():
             query = request.json.get('q')
         else:
             query = request.form.get('q')
-
+        
         if not query:
             current_app.logger.warning(f"Query is missing. Headers: {request.headers}, Data: {request.data}")
             return create_standard_response({'error': 'Query is required'}, 400, "Query is required")
@@ -291,35 +290,35 @@ def process_query():
 
         # Fetch trending topics or perform search
         results = fetch_trending_topics(query)
+        
+        processed_results = []
+        for result in results:
+            if isinstance(result, dict):
+                result_text = f"{result.get('title', '')} {result.get('summary', '')}"
+                processed_result_data = process_query_with_spacy(result_text)
+                processed_results.append({
+                    'source': result.get('source', ''),
+                    'title': result.get('title', ''),
+                    'summary': result.get('summary', ''),
+                    'url': result.get('url', ''),
+                    'entities': processed_result_data['entities'],
+                    'verbs': processed_result_data['verbs'],
+                    'nouns': processed_result_data['nouns']
+                })
+            else:
+                processed_results.append({
+                    'text': str(result)
+                })
 
-# Ensure the results are JSON-serializable
-for result in results:
-    if isinstance(result, dict):
-        result_text = f"{result.get('title', '')} {result.get('summary', '')}"
-        processed_result_data = process_query_with_spacy(result_text)
-        processed_results.append({
-            'source': result.get('source', ''),
-            'title': result.get('title', ''),
-            'summary': result.get('summary', ''),
-            'url': result.get('url', ''),
-            'entities': processed_result_data['entities'],
-            'verbs': processed_result_data['verbs'],
-            'nouns': processed_result_data['nouns']
-        })
-    else:
-        # Ensure non-dictionary results are serialized appropriately
-        processed_results.append({
-            'text': str(result)  # Ensure it's serialized as a string
-        })
-            
         # Log processed results to debug serialization issues
         logger.info(f"Processed results: {processed_results}")
-        
+
         # Return JSON-serializable response
         return create_standard_response({
             'query': processed_query_data,
             'results': processed_results
         }, 200, "Query processed successfully")
+
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
