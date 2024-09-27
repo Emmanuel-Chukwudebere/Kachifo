@@ -58,6 +58,11 @@ class UserQuery(db.Model):
     verbs = db.Column(db.Text, nullable=True)
     nouns = db.Column(db.Text, nullable=True)
     timestamp = db.Column(db.DateTime, default=db.func.now())
+    
+    def set_spacy_data(self, processed_data):
+        self.entities = json.dumps(processed_data['entities'])
+        self.verbs = json.dumps(processed_data['verbs'])
+        self.nouns = json.dumps(processed_data['nouns'])
 
 # Advanced logging setup
 def setup_logging():
@@ -208,31 +213,37 @@ def search_trends():
         results = fetch_trending_topics(query)
         current_app.logger.info(f"Search results for '{query}': {len(results)} items found")
 
-        # Process the fetched results with spaCy and Ensure the results are JSON-serializable
-for result in results:
-    if isinstance(result, dict):
-        result_text = f"{result.get('title', '')} {result.get('summary', '')}"
-        processed_result_data = process_query_with_spacy(result_text)
-        processed_results.append({
-            'source': result.get('source', ''),
-            'title': result.get('title', ''),
-            'summary': result.get('summary', ''),
-            'url': result.get('url', ''),
-            'entities': processed_result_data['entities'],
-            'verbs': processed_result_data['verbs'],
-            'nouns': processed_result_data['nouns']
-        })
-    else:
-        # Ensure non-dictionary results are serialized appropriately
-        processed_results.append({
-            'text': str(result)  # Ensure it's serialized as a string
-        })
+        # Process the fetched results with spaCy
+        processed_results = []
+        for result in results:
+            if isinstance(result, dict):
+                result_text = f"{result.get('title', '')} {result.get('summary', '')}"
+                processed_result_data = process_query_with_spacy(result_text)
+                processed_results.append({
+                    'source': result.get('source', ''),
+                    'title': result.get('title', ''),
+                    'summary': result.get('summary', ''),
+                    'url': result.get('url', ''),
+                    'entities': processed_result_data['entities'],
+                    'verbs': processed_result_data['verbs'],
+                    'nouns': processed_result_data['nouns']
+                })
+            else:
+                # Ensure non-dictionary results are serialized appropriately
+                processed_results.append({
+                    'text': str(result)  # Ensure it's serialized as a string
+                })
 
-        # Ensure we return JSON-serializable data
+        # Log processed results to debug serialization issues
+        logger.info(f"Processed search results: {processed_results}")
+
+        # Return JSON-serializable response
         return create_standard_response({
             'query': query,
+            'processed_query': processed_query_data,
             'results': processed_results
-        }, 200, "Query processed successfully")
+        }, 200, "Search query processed successfully")
+
     except BadRequest as e:
         logger.error(f"Bad request: {str(e)}")
         return create_standard_response(None, 400, str(e))
@@ -241,23 +252,42 @@ for result in results:
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
 @app.route('/recent_searches', methods=['GET'])
+@rate_limit
 def recent_searches():
     try:
+        # Fetch the 10 most recent queries
         recent_queries = UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
+        
         recent_searches_processed = []
         for query in recent_queries:
             # Process each recent query text with spaCy
             processed_query_data = process_query_with_spacy(query.query)
+            
+            # Parse the stored string representations back into lists
+            entities = json.loads(query.entities.replace("'", '"'))
+            verbs = json.loads(query.verbs.replace("'", '"'))
+            nouns = json.loads(query.nouns.replace("'", '"'))
+            
             recent_searches_processed.append({
                 'query': query.query,
-                'entities': processed_query_data['entities'],
-                'verbs': processed_query_data['verbs'],
-                'nouns': processed_query_data['nouns']
+                'timestamp': query.timestamp.isoformat(),
+                'entities': entities,
+                'verbs': verbs,
+                'nouns': nouns,
+                'processed_data': processed_query_data  # Include the freshly processed data
             })
+        
+        logger.info(f"Fetched {len(recent_searches_processed)} recent searches")
+        
         return create_standard_response(recent_searches_processed, 200, "Recent searches retrieved successfully")
+    
+    except SQLAlchemyError as e:
+        logger.error(f"Database error while fetching recent searches: {str(e)}", exc_info=True)
+        return create_standard_response(None, 500, "A database error occurred while fetching recent searches")
+    
     except Exception as e:
-        logger.error(f"Error fetching recent searches: {str(e)}", exc_info=True)
-        return create_standard_response(None, 500, "An error occurred while fetching recent searches")
+        logger.error(f"Unexpected error while fetching recent searches: {str(e)}", exc_info=True)
+        return create_standard_response(None, 500, "An unexpected error occurred while fetching recent searches")
         
 @app.route('/process-query', methods=['POST'])
 @rate_limit
