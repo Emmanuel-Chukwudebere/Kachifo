@@ -302,17 +302,21 @@ def recent_searches():
 def process_query():
     try:
         logger.debug("Received request to /process-query")
+        
+        # Extract the query from the request (JSON or form)
         if request.is_json:
             query = request.json.get('q')
         else:
             query = request.form.get('q')
-        
+
         logger.info(f"Processing query: {query}")
         
+        # Ensure query is provided
         if not query:
             logger.warning("Query is missing")
             return create_standard_response({'error': 'Query is required'}, 400, "Query is required")
         
+        # Sanitize the input query
         query = sanitize_input(query)
         logger.debug(f"Sanitized query: {query}")
         
@@ -320,7 +324,7 @@ def process_query():
         processed_query_data = process_query_with_spacy(query)
         logger.debug(f"Processed query data: {processed_query_data}")
         
-        # Store the user's query with spaCy data
+        # Store the user's query with spaCy data in the database
         new_query = UserQuery(query=query)
         new_query.set_spacy_data(processed_query_data)
         db.session.add(new_query)
@@ -336,30 +340,42 @@ def process_query():
             if isinstance(result, dict):
                 result_text = f"{result.get('title', '')} {result.get('summary', '')}"
                 processed_result_data = process_query_with_spacy(result_text)
+                
+                # Safely get the 'url', set to None if missing
                 processed_result = {
-                    'source': result.get('source', ''),
-                    'title': result.get('title', ''),
-                    'summary': result.get('summary', ''),
-                    'url': result.get('url', ''),
+                    'source': result.get('source', 'Unknown'),  # Fallback to 'Unknown' if source is missing
+                    'title': result.get('title', 'No Title'),  # Fallback to 'No Title' if title is missing
+                    'summary': result.get('summary', 'No Summary'),  # Fallback to 'No Summary' if summary is missing
+                    'url': result.get('url', None),  # Set to None if URL is missing
                     'entities': processed_result_data['entities'],
                     'verbs': processed_result_data['verbs'],
                     'nouns': processed_result_data['nouns']
                 }
                 processed_results.append(processed_result)
-                logger.debug(f"Processed result: {processed_result}")
+                
+                # Log important fields
+                logger.info(f"Processed result: Source: {processed_result['source']}, Title: {processed_result['title']}, URL: {processed_result['url'] or 'No URL'}")
+                logger.debug(f"Summary: {processed_result['summary']}")
             else:
-                processed_results.append({
-                    'text': str(result)
-                })
-                logger.debug(f"Non-dict result: {result}")
-        
+                # For non-dict results, just log them and serialize as text
+                processed_results.append({'text': str(result)})
+                logger.warning(f"Non-dict result encountered: {result}")
+
         logger.debug(f"Processed {len(processed_results)} results")
-        logger.info(f"Sample URL from results: {processed_results[0]['url'] if processed_results else 'No results'}")
         
+        # Log sample data from the first result
+        if processed_results:
+            first_result = processed_results[0]
+            logger.info(f"Sample Result - Source: {first_result.get('source', 'Unknown')}, Title: {first_result.get('title', 'No Title')}, URL: {first_result.get('url') if first_result.get('url') else 'No URL'}")
+        else:
+            logger.info("No results to process")
+        
+        # Prepare response data
         response_data = {
             'query': processed_query_data,
             'results': processed_results
         }
+
         logger.info("Sending response")
         return create_standard_response(response_data, 200, "Query processed successfully")
     
