@@ -161,7 +161,7 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
                 'source': 'YouTube',
                 'title': title,
                 'summary': summary,
-                'url': video_url
+                'url': video_url if video_url else '',  # Ensure the 'url' field is always included
             })
 
         logger.info(f"Fetched {len(results)} YouTube trends.")
@@ -192,7 +192,7 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
                 'source': 'NewsAPI',
                 'title': title,
                 'summary': summary,
-                'url': article_url
+                'url': article_url if article_url else '',  # Ensure the 'url' field is always included
             })
 
         logger.info(f"Fetched {len(results)} news trends.")
@@ -223,7 +223,7 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
                 'source': 'Google',
                 'title': title,
                 'summary': summary,
-                'url': link
+                'url': link if link else '',  # Ensure the 'url' field is always included
             })
 
         logger.info(f"Fetched {len(results)} Google trends.")
@@ -279,7 +279,7 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
                 'source': 'Twitter',
                 'title': f"Tweet by @{username}",
                 'summary': summary,
-                'url': f"https://twitter.com/{username}/status/{tweet['id']}"
+                'url': f"https://twitter.com/{username}/status/{tweet['id']}" if f"https://twitter.com/{username}/status/{tweet['id']}" else '',  # Ensure the 'url' field is always included
             })
 
         logger.info(f"Fetched {len(results)} Twitter trends.")
@@ -330,7 +330,7 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
                 'source': 'Reddit',
                 'title': title,
                 'summary': summary,
-                'url': url
+                'url': url if url else '',  # Ensure the 'url' field is always included
             })
 
         logger.info(f"Fetched {len(results)} Reddit trends.")
