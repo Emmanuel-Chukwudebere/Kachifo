@@ -5,6 +5,7 @@ const chatWindow = document.querySelector('.chat-window');
 const initialView = document.querySelector('.initial-view');
 const suggestions = document.querySelector('.suggestions');
 const newChatIcon = document.querySelector('.new-chat-icon');
+
 const loadingGifPath = 'static/icons/typing-gif.gif';
 const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg';
 
@@ -68,10 +69,12 @@ function createChatBubble(message, sender, isTyping = false) {
 }
 
 // Function to handle sending a message
-if (!message) {
+async function sendMessage(message) {
+    if (!message) {
         message = userInput.value.trim();
     }
     if (message === '') return;
+
     console.log('Search initiated', { query: message, timestamp: new Date().toISOString() });
     createChatBubble(message, 'user');
     userInput.value = '';
@@ -100,107 +103,36 @@ if (!message) {
         typingBubble.remove();
 
         if (data.data && data.data.general_summary && data.data.dynamic_response && data.data.results) {
-            // Combine general summary and dynamic response
-            let combinedResponse = `${data.data.general_summary} ${data.data.dynamic_response}`;
-
-            // Function to get a friendly name for the source
-            const getFriendlySourceName = (source) => {
-                const sourceMap = {
-                    'YouTube': 'a popular video',
-                    'NewsAPI': 'a recent news article',
-                    'Google': 'a web search result',
-                    'Twitter': 'a trending tweet',
-                    'Reddit': 'a discussion on Reddit'
-                };
-                return sourceMap[source] || 'an interesting source';
-            };
-
-            // Integrate detailed results into the response
-            data.data.results.forEach(item => {
-                combinedResponse += `\n\nI found ${getFriendlySourceName(item.source)} that might interest you: <strong>${item.title}</strong>. ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more here</a>.`;
-            });
-
-            // Add a human-like conclusion
-            combinedResponse += "\n\nIs there any specific aspect of these trends you'd like to explore further? Or perhaps you have another topic in mind?";
-
-            createChatBubble(combinedResponse, 'kachifo');
+            const formattedResponse = formatResponse(data.data);
+            createChatBubble(formattedResponse, 'kachifo');
         } else if (data.error) {
-            createChatBubble(`I'm sorry, but I encountered an issue while searching: ${data.error}. Could you try rephrasing your query or asking about something else?`, 'kachifo');
+            createChatBubble(`Error: ${data.error}`, 'kachifo');
         } else {
-            createChatBubble("I apologize, but I'm having trouble processing that request right now. Could you try asking something else?", 'kachifo');
+            createChatBubble('Received an unexpected response format.', 'kachifo');
             console.error('Unexpected response format:', data);
         }
     } catch (error) {
         console.error('Error:', error);
         typingBubble.remove();
-        createChatBubble("I'm sorry, but something went wrong on my end. Could we try that again?", 'kachifo');
+        createChatBubble('Something went wrong. Please try again.', 'kachifo');
     }
 }
 
-// Function to handle searching for trends (GET method)
-async function fetchSearchResults(query) {
-    try {
-        const response = await fetch(`/search?q=${encodeURIComponent(query)}`, {
-            method: 'GET',
-        });
+// Function to format the response in a more conversational manner
+function formatResponse(data) {
+    let response = `${data.general_summary} ${data.dynamic_response}\n\n`;
+    response += "Here's what I found:\n\n";
 
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+    data.results.forEach((item, index) => {
+        response += `<strong>${index + 1}. ${item.title}</strong>\n`;
+        response += `${item.summary}\n`;
+        if (item.url) {
+            response += `<a href="${item.url}" target="_blank" rel="noopener noreferrer">Learn more</a>\n`;
         }
+        response += '\n';
+    });
 
-        const data = await response.json();
-
-        if (Array.isArray(data.results)) {
-            const formattedResponse = data.results.map(item => 
-                `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}\n\nEntities: ${item.entities.join(', ')}\nVerbs: ${item.verbs.join(', ')}\nNouns: ${item.nouns.join(', ')}`
-            ).join('\n\n');
-            createChatBubble(formattedResponse, 'kachifo');
-        } else if (data.error) {
-            createChatBubble(`Error: ${data.error}`, 'kachifo');
-        } else {
-            createChatBubble('Received an unexpected response format.', 'kachifo');
-        }
-    } catch (error) {
-        console.error('Error fetching search results:', error);
-        createChatBubble('Error fetching search results. Please try again.', 'kachifo');
-    }
-}
-
-// Function to fetch recent searches (GET method)
-async function fetchRecentSearches() {
-    try {
-        const response = await fetch('/recent_searches', {
-            method: 'GET',
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        if (Array.isArray(data.recent)) {
-            const formattedResponse = data.recent.map(search => 
-                `Query: ${search.query}\nTimestamp: ${search.timestamp}`
-            ).join('\n\n');
-            createChatBubble(formattedResponse, 'kachifo');
-        } else if (data.error) {
-            createChatBubble(`Error: ${data.error}`, 'kachifo');
-        } else {
-            createChatBubble('Received an unexpected response format.', 'kachifo');
-        }
-    } catch (error) {
-        console.error('Error fetching recent searches:', error);
-        createChatBubble('Error fetching recent searches. Please try again.', 'kachifo');
-    }
-}
-
-// Function to reset the chat
-function resetChat() {
-    chatWindow.innerHTML = '';
-    initialView.classList.remove('hidden');
-    suggestions.classList.remove('hidden');
-    chatWindow.classList.remove('active');
-    scrollToBottom();
+    return response;
 }
 
 // Function to check if the user is on a desktop
@@ -243,6 +175,15 @@ document.querySelectorAll('.suggestion').forEach(suggestion => {
 
 // Event listener for the New Chat icon
 newChatIcon.addEventListener('click', resetChat);
+
+// Function to reset the chat
+function resetChat() {
+    chatWindow.innerHTML = '';
+    initialView.classList.remove('hidden');
+    suggestions.classList.remove('hidden');
+    chatWindow.classList.remove('active');
+    scrollToBottom();
+}
 
 // Initial scroll to bottom on page load
 scrollToBottom();
