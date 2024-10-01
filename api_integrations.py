@@ -8,6 +8,9 @@ from dotenv import load_dotenv
 import spacy
 from typing import List, Dict, Any
 import re
+import json
+import time
+from functools import wraps
 
 # Load environment variables
 load_dotenv()
@@ -40,6 +43,29 @@ REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_SECRET = os.getenv("REDDIT_SECRET")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 
+# Rate limit configuration
+last_called = 0
+rate_limit_seconds = 1  # 1 second between API calls
+
+def rate_limited(max_per_second: float):
+    """Rate limit decorator."""
+    min_interval = 1.0 / max_per_second
+    
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            nonlocal last_called
+            elapsed = time.time() - last_called
+            wait_time = min_interval - elapsed
+            
+            if wait_time > 0:
+                time.sleep(wait_time)
+            last_called = time.time()
+            return func(*args, **kwargs)
+        
+        return wrapper
+    return decorator
+
 # Process user input with SpaCy
 def process_user_input(user_input: str) -> str:
     """Extract relevant keywords and entities from user input using SpaCy."""
@@ -51,22 +77,36 @@ def process_user_input(user_input: str) -> str:
 
     return ' '.join(set(entities + keywords))  # return as string, which is JSON-serializable
 
+# Process text with SpaCy to create a meaningful summary
+def process_text_with_spacy(text: str) -> str:
+    """
+    Processes text with SpaCy to filter tokens, returning a summary made of the first 30 meaningful tokens.
+    """
+    original_length = len(text)
+    doc = nlp(text)
+    
+    # Filter out single characters or whitespace tokens
+    meaningful_tokens = [token.text for token in doc if len(token.text) > 1]
+    
+    # Log the original length and number of meaningful tokens
+    logger.info(f"Original text length: {original_length}, Number of meaningful tokens: {len(meaningful_tokens)}")
+    
+    # Join the first 30 meaningful tokens to create a summary
+    summary = " ".join(meaningful_tokens[:30])
+    
+    logger.info(f"Generated summary: {summary}")
+    return summary
+
 # Generate a dynamic response
 def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) -> str:
     """Generate a dynamic response using SpaCy analysis of user input and API results."""
     doc = nlp(user_input)
     main_topic = next((token.text for token in doc if token.pos_ in ['NOUN', 'PROPN']), "this topic")
-    sentiment = doc.sentiment
+    
+    # Generate introduction
+    intro = f"Here's what I discovered about {main_topic}:\n\n" if not doc.sentiment else f"Great choice! I found some exciting trends about {main_topic}:\n\n"
 
-    # Generate introduction based on sentiment
-    if sentiment > 0.5:
-        intro = f"Great choice! I found some exciting trends about {main_topic}:"
-    elif sentiment < -0.5:
-        intro = f"I understand your concern about {main_topic}. Here's what's trending:"
-    else:
-        intro = f"Here's what I discovered about {main_topic}:"
-
-    response = f"{intro}\n\n"
+    response = f"{intro}"
 
     for result in results:
         response += f"📌 {result['source']}: {result['title']}\n"
@@ -84,74 +124,39 @@ def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) ->
 
 # Cache API results
 @cached(cache)
-def fetch_trending_topics(user_input: str) -> List[Dict[str, Any]]:
+@rate_limited(1.0)  # Rate limit to 1 request per second
+def fetch_trending_topics(user_input: str) -> str:
     try:
         logger.info(f"Processing user input: {user_input}")
         query = process_user_input(user_input)
         logger.info(f"Extracted query: {query}")
-        results = []
         
         # Fetch results from each API
-        youtube_results = fetch_youtube_trends(query)
-        news_results = fetch_news_trends(query)
-        twitter_results = fetch_twitter_trends(query)
-        reddit_results = fetch_reddit_trends(query)
-        google_results = fetch_google_trends(query)
+        results = (
+            fetch_youtube_trends(query) +
+            fetch_news_trends(query) +
+            fetch_twitter_trends(query) +
+            fetch_reddit_trends(query) +
+            fetch_google_trends(query)
+        )
         
-        # Filter out any empty or malformed results
-        for result_set in [youtube_results, news_results, twitter_results, reddit_results, google_results]:
-            for result in result_set:
-                if isinstance(result, dict) and result.get('title') and result.get('summary'):
-                    results.append(result)
-                else:
-                    logger.warning(f"Skipped invalid result: {repr(result)}")
+        # Filter valid results using list comprehension
+        valid_results = [result for result in results if isinstance(result, dict) and result.get('title') and result.get('summary')]
         
         # Limit to the first 10 valid results
-        results = results[:10]
+        valid_results = valid_results[:10]
         
-        if not results:
+        if not valid_results:
             return f"I couldn't find any relevant trends about {query} at the moment. Could you try rephrasing your query or exploring a different topic?"
-
+        
         # Generate dynamic response
-        return generate_dynamic_response(user_input, results)
-    except Exception as e:
+        return generate_dynamic_response(user_input, valid_results)
+    except RequestException as e:
         logger.error(f"Error fetching trending topics: {str(e)}", exc_info=True)
         return f"I apologize, but I encountered an unexpected issue while fetching trends about {query}. Could we try again with a different query?"
 
-
-def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) -> str:
-    """Generate a dynamic response using SpaCy analysis of user input and API results."""
-    doc = nlp(user_input)
-    main_topic = next((token.text for token in doc if token.pos_ in ['NOUN', 'PROPN']), "this topic")
-    sentiment = doc.sentiment
-    
-    # Generate introduction based on sentiment
-    if sentiment > 0.5:
-        intro = f"Great choice! I found some exciting trends about {main_topic}:"
-    elif sentiment < -0.5:
-        intro = f"I understand your concern about {main_topic}. Here's what's trending:"
-    else:
-        intro = f"Here's what I discovered about {main_topic}:"
-    
-    response = f"{intro}\n\n"
-    
-    for result in results:
-        response += f" {result['source']}: {result['title']}\n"
-        response += f" {result['summary']}\n"
-        response += f" More at: {result['url']}\n\n"
-    
-    # Generate a conclusion
-    if len(results) > 5:
-        conclusion = f"Wow, there's a lot of buzz around {main_topic}! Which aspect interests you most?"
-    else:
-        conclusion = f"These are the top trends for {main_topic}. Would you like to explore any specific area further?"
-    
-    response += conclusion
-    
-    return response
-    
-    
 # Fetch YouTube trends
+@rate_limited(1.0)
 def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending YouTube videos matching the query."""
     try:
@@ -166,10 +171,8 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
             title = item['snippet']['title']
             description = item['snippet']['description']
             video_url = f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-            # Extract first sentence of description as summary
-            summary = str(next(nlp(description).sents)) if description else title  # Use title if no description
+            summary = process_text_with_spacy(description)  # Use the new processing function
 
-            # Ensure the 'url' field is valid and include meaningful summaries
             if title and summary and video_url:
                 results.append({
                     'source': 'YouTube',
@@ -187,6 +190,7 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
         return []
 
 # Fetch News trends
+@rate_limited(1.0)
 def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending news articles matching the query."""
     try:
@@ -201,7 +205,7 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
             title = article['title']
             content = article['content'] or article['description']
             article_url = article['url']
-            summary = str(next(nlp(content).sents)) if content else title  # Use title if no content
+            summary = process_text_with_spacy(content)  # Use the new processing function
 
             if title and summary and article_url:
                 results.append({
@@ -220,6 +224,7 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
         return []
 
 # Fetch Google Search trends
+@rate_limited(1.0)
 def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch Google Custom Search results matching the query."""
     try:
@@ -234,7 +239,7 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
             title = item['title']
             snippet = item['snippet']
             link = item['link']
-            summary = str(next(nlp(snippet).sents)) if snippet else title  # Use title if no snippet
+            summary = process_text_with_spacy(snippet)  # Use the new processing function
 
             if title and summary and link:
                 results.append({
@@ -253,10 +258,12 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
         return []
 
 # Fetch Twitter trends using OAuth1.0a for authentication
+@rate_limited(1.0)
 def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending tweets matching the query using OAuth1."""
     try:
         logger.info(f"Fetching Twitter trends for query: {query}")
+        
         search_url = "https://api.twitter.com/2/tweets/search/recent"
         auth = OAuth1(
             client_key=TWITTER_API_KEY,
@@ -264,14 +271,17 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
             resource_owner_key=TWITTER_ACCESS_TOKEN,
             resource_owner_secret=TWITTER_ACCESS_TOKEN_SECRET
         )
+
         params = {
             'query': query,
             'tweet.fields': 'text,author_id,created_at',
             'expansions': 'author_id',
             'user.fields': 'username'
         }
+        
         response = requests.get(search_url, params=params, auth=auth)
         response.raise_for_status()
+
         data = response.json()
 
         results = []
@@ -280,7 +290,7 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
             author_id = tweet['author_id']
             author = next((user for user in data.get('includes', {}).get('users', []) if user['id'] == author_id), None)
             username = author['username'] if author else "Unknown"
-            summary = str(next(nlp(tweet_text).sents)) if len(tweet_text) > 100 else tweet_text
+            summary = process_text_with_spacy(tweet_text) if len(tweet_text) > 100 else tweet_text
 
             if username and summary and tweet['id']:
                 results.append({
@@ -294,26 +304,28 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
 
         logger.info(f"Fetched {len(results)} Twitter trends.")
         return results
+
     except RequestException as e:
         logger.error(f"Error fetching Twitter trends: {str(e)}")
         return []
 
 # Fetch Reddit trends
+@rate_limited(1.0)
 def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending Reddit posts matching the query."""
     try:
         logger.info(f"Fetching Reddit trends for query: {query}")
         auth = requests.auth.HTTPBasicAuth(REDDIT_CLIENT_ID, REDDIT_SECRET)
         headers = {'User-Agent': REDDIT_USER_AGENT}
-
+        
         # Get token
-        response = requests.post('https://www.reddit.com/api/v1/access_token',
-                                 auth=auth,
+        response = requests.post('https://www.reddit.com/api/v1/access_token', 
+                                 auth=auth, 
                                  data={'grant_type': 'client_credentials'},
                                  headers=headers)
         response.raise_for_status()
         token = response.json()['access_token']
-
+        
         # Use token to get trends
         headers['Authorization'] = f'bearer {token}'
         search_url = f"https://oauth.reddit.com/r/all/search?q={query}&sort=relevance&t=week"
@@ -326,11 +338,8 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
             title = post['data']['title']
             selftext = post['data']['selftext']
             url = f"https://www.reddit.com{post['data']['permalink']}"
+            summary = process_text_with_spacy(selftext) if selftext else title
 
-            # Process selftext, or use the title as the summary if no selftext
-            summary = str(next(nlp(selftext).sents)) if selftext else title
-
-            # Ensure the 'url' field is valid and the result contains a meaningful summary
             if title and summary and url:
                 results.append({
                     'source': 'Reddit',
@@ -351,7 +360,7 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
 def get_trends(user_input: str) -> str:
     sanitized_input = re.sub(r"[^\w\s]", "", user_input).strip()
     logger.info(f"Sanitized input: {sanitized_input}")
-    return fetch_trending_topics(sanitized_input)
+    return json.dumps(fetch_trending_topics(sanitized_input))
 
 # Entry point for the script
 if __name__ == "__main__":
