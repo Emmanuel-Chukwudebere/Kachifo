@@ -1,12 +1,14 @@
 // JavaScript for chat interaction
+
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 const chatWindow = document.querySelector('.chat-window');
 const initialView = document.querySelector('.initial-view');
 const suggestions = document.querySelector('.suggestions');
 const newChatIcon = document.querySelector('.new-chat-icon');
-const loadingGifPath = 'static/icons/typing-gif.gif';
-const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg';
+
+const loadingGifPath = 'static/icons/typing-gif.gif';  // Update this path if needed
+const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg';  // Update this path if needed
 
 // Debounce function to limit the rate of function calls
 function debounce(func, wait) {
@@ -34,12 +36,13 @@ function formatMessageWithLinks(message) {
     });
 }
 
-// Function to create chat bubbles
+// Function to create chat bubbles for user and system messages
 function createChatBubble(message, sender, isTyping = false) {
     const bubble = document.createElement('div');
     bubble.classList.add(sender === 'kachifo' ? 'kachifo-message' : 'user-message');
     bubble.setAttribute('aria-live', 'polite');
 
+    // Kachifo logo for system messages
     if (sender === 'kachifo') {
         const kachifoLogo = document.createElement('img');
         kachifoLogo.src = kachifoLogoPath;
@@ -73,7 +76,10 @@ async function sendMessage(message) {
         message = userInput.value.trim();
     }
     if (message === '') return;
+
     console.log('Search initiated', { query: message, timestamp: new Date().toISOString() });
+
+    // Display user input
     createChatBubble(message, 'user');
     userInput.value = '';
     userInput.style.height = 'auto';
@@ -82,48 +88,59 @@ async function sendMessage(message) {
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
 
+    // Show the typing indicator
     const typingBubble = createChatBubble('', 'kachifo', true);
 
     try {
-        const response = await fetch('/process-query', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ q: message }),
-            timeout: 30000 // 30 seconds timeout
-        });
+        // Concurrently fetching results from /process-query and /search
+        const [processQueryResponse, searchResponse] = await Promise.all([
+            fetch('/process-query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ q: message })
+            }),
+            fetch(`/search?q=${encodeURIComponent(message)}`)
+        ]);
 
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+        if (!processQueryResponse.ok || !searchResponse.ok) {
+            throw new Error(`HTTP error! processQuery: ${processQueryResponse.status}, search: ${searchResponse.status}`);
         }
 
-        const data = await response.json();
+        const processQueryData = await processQueryResponse.json();
+        const searchData = await searchResponse.json();
+
         typingBubble.remove();
 
-        if (data.data && data.data.results) {
-            const formattedResponse = `
-            <strong>General Summary:</strong><br>${data.general_summary}<br><br>
-            ${data.results.map(item => `
-                <strong>${item.source}:</strong> ${item.title}
-                <br>Summary: ${item.summary}
-                ${item.url ? `<br>URL: <a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a>` : '<br>URL: Not available'}
-                <br><br>
-            `).join('')}
-        `;
-        createChatBubble(formattedResponse, 'kachifo');
+        // Combine both results and display
+        handleResults(processQueryData, searchData);
 
-        } else if (data.error) {
-            createChatBubble(`Error: ${data.error}`, 'kachifo');
-        } else {
-            createChatBubble('Received an unexpected response format.', 'kachifo');
-            console.error('Unexpected response format:', data);
-        }
     } catch (error) {
         console.error('Error:', error);
         typingBubble.remove();
         createChatBubble('Something went wrong. Please try again.', 'kachifo');
     }
+}
+
+function handleResults(processQueryData, searchData) {
+    // Handle both the processQueryData and searchData here
+    const formattedResults = `
+        <strong>Process Query Results:</strong><br>
+        ${processQueryData.data.results.map(item => `
+            <strong>${item.source}:</strong> ${item.title}
+            <br>Summary: ${item.summary}
+            <br>URL: <a href="${item.url}" target="_blank">${item.url}</a>
+            <br><br>
+        `).join('')}
+        <strong>Search Results:</strong><br>
+        ${searchData.data.results.map(item => `
+            <strong>${item.source}:</strong> ${item.title}
+            <br>Summary: ${item.summary}
+            <br>URL: <a href="${item.url}" target="_blank">${item.url}</a>
+            <br><br>
+        `).join('')}
+    `;
+
+    createChatBubble(formattedResults, 'kachifo');
 }
 
 // Function to handle searching for trends (GET method)
@@ -141,7 +158,7 @@ async function fetchSearchResults(query) {
 
         if (Array.isArray(data.results)) {
             const formattedResponse = data.results.map(item => 
-                `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}\n\nEntities: ${item.entities.join(', ')}\nVerbs: ${item.verbs.join(', ')}\nNouns: ${item.nouns.join(', ')}`
+                `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}`
             ).join('\n\n');
             createChatBubble(formattedResponse, 'kachifo');
         } else if (data.error) {
@@ -167,8 +184,8 @@ async function fetchRecentSearches() {
         }
 
         const data = await response.json();
-        if (Array.isArray(data.recent)) {
-            const formattedResponse = data.recent.map(search => 
+        if (Array.isArray(data.data)) {
+            const formattedResponse = data.data.map(search => 
                 `Query: ${search.query}\nTimestamp: ${search.timestamp}`
             ).join('\n\n');
             createChatBubble(formattedResponse, 'kachifo');
