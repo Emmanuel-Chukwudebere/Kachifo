@@ -84,17 +84,21 @@ def process_text_with_spacy(text: str) -> str:
     original_length = len(text)
     doc = nlp(text)
     
-    # Filter out single characters or whitespace tokens
-    meaningful_tokens = [token.text for token in doc if len(token.text) > 1]
-    
+    # Filter out tokens that are too short, punctuation, or whitespace
+    meaningful_tokens = [token.text for token in doc if len(token.text.strip()) > 1 and not token.is_punct]
+
     # Log the original length and number of meaningful tokens
     logger.info(f"Original text length: {original_length}, Number of meaningful tokens: {len(meaningful_tokens)}")
+    
+    # If no meaningful tokens, return an empty summary
+    if not meaningful_tokens:
+        return ""
     
     # Join the first 30 meaningful tokens to create a summary
     summary = " ".join(meaningful_tokens[:30])
     
     logger.info(f"Generated summary: {summary}")
-    return summary
+    return summary if summary.strip() else "No meaningful summary generated."
 
 # Generate a dynamic response
 def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) -> str:
@@ -103,7 +107,7 @@ def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) ->
     main_topic = next((token.text for token in doc if token.pos_ in ['NOUN', 'PROPN']), "this topic")
     
     # Generate introduction
-    intro = f"Here's what I discovered about {main_topic}:\n\n" if not doc.sentiment else f"Great choice! I found some exciting trends about {main_topic}:\n\n"
+    intro = f"Here's what I discovered about {main_topic}:\n\n"
 
     response = f"{intro}"
 
@@ -129,6 +133,7 @@ def generate_general_summary(summaries: List[str]) -> str:
     if not summaries:
         return "No meaningful summaries could be generated from the current trends."
     
+    # Combine summaries into a single text
     combined_text = " ".join(summaries)
     combined_doc = nlp(combined_text)
 
@@ -162,11 +167,9 @@ def fetch_trending_topics(user_input: str) -> str:
         # Filter valid results using list comprehension
         valid_results = [result for result in results if isinstance(result, dict) and result.get('title') and result.get('summary')]
         
-        # Limit to the first 10 valid results
-        valid_results = valid_results[:10]
-        
         if not valid_results:
-            return f"I couldn't find any relevant trends about {query} at the moment. Could you try rephrasing your query or exploring a different topic?"
+            logger.warning("No valid results were found after filtering.")
+            return json.dumps({"error": "No relevant trends found for the query. Please try again with a different topic."})
         
         # Generate summaries for valid results
         individual_summaries = [result['summary'] for result in valid_results]
@@ -181,9 +184,10 @@ def fetch_trending_topics(user_input: str) -> str:
         response = generate_dynamic_response(user_input, valid_results)
         
         return json.dumps({"general_summary": general_summary, "individual_results": response})
-    except RequestException as e:
-        logger.error(f"Error fetching trending topics: {str(e)}", exc_info=True)
-        return f"I apologize, but I encountered an unexpected issue while fetching trends about {query}. Could we try again with a different query?"
+    
+    except Exception as e:
+        logger.error(f"Unexpected error during processing: {str(e)}", exc_info=True)
+        return json.dumps({"error": "An unexpected error occurred. Please try again later."})
 
 # Fetch YouTube trends
 @rate_limited(1.0)
