@@ -82,9 +82,7 @@ def process_text_with_spacy(text: str) -> str:
     Processes text with SpaCy to filter tokens, returning a summary made of the first 30 meaningful tokens.
     Limits text length to avoid memory overload.
     """
-    # Limit the text length to 1000 characters before processing
-    text = text[:1000]
-    
+    text = text[:1000]  # Limit the text length to 1000 characters
     original_length = len(text)
     doc = nlp(text)
     
@@ -138,14 +136,15 @@ def generate_general_summary(summaries: List[str]) -> str:
     combined_text = " ".join(summaries)
     combined_doc = nlp(combined_text)
 
-    # Extract key sentences to make a meaningful summary
-    key_sentences = []
-    for sent in combined_doc.sents:
-        key_sentences.append(sent.text)
+    # Filter out irrelevant sentences and duplicates
+    sentences = list(dict.fromkeys([sent.text for sent in combined_doc.sents if len(sent.text.strip()) > 5]))
 
-    # Generate a summary using the first few key sentences
-    general_summary = " ".join(key_sentences[:3])  # Adjust the number of sentences as needed
-    return general_summary if general_summary.strip() else "No meaningful trends were identified."
+    if not sentences:
+        return "No meaningful summary could be generated."
+
+    # Generate a structured summary using the first few sentences
+    general_summary = " ".join(sentences[:3])  # Adjust the number of sentences as needed
+    return general_summary
 
 # Cache API results
 @cached(cache)
@@ -182,21 +181,27 @@ def fetch_trending_topics(user_input: str) -> str:
         logger.info(f"Generated general summary: {general_summary}")
 
         # Generate dynamic response with individual results
-        response = generate_dynamic_response(user_input, valid_results)
+        dynamic_response = generate_dynamic_response(user_input, valid_results)
         
-        return json.dumps({"general_summary": general_summary, "individual_results": response})
+        # Combine the general summary with the dynamic response
+        response = {
+            "general_summary": general_summary,
+            "dynamic_response": dynamic_response
+        }
+
+        return json.dumps(response)
     
     except Exception as e:
         logger.error(f"Unexpected error during processing: {str(e)}", exc_info=True)
         return json.dumps({"error": "An unexpected error occurred. Please try again later."})
 
-# Fetch YouTube trends (Limit to 5 results)
+# Fetch YouTube trends (Limited to 5 results)
 @rate_limited(1.0)
 def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending YouTube videos matching the query."""
     try:
         logger.info(f"Fetching YouTube trends for query: {query}")
-        search_url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&type=video&maxResults=5&key={YOUTUBE_API_KEY}"  # Limiting results to 5
+        search_url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&type=video&maxResults=5&key={YOUTUBE_API_KEY}"
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -222,13 +227,13 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching YouTube trends: {str(e)}")
         return []
 
-# Fetch News trends (Limit to 5 results)
+# Fetch News trends (Limited to 5 results)
 @rate_limited(1.0)
 def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending news articles matching the query."""
     try:
         logger.info(f"Fetching news trends for query: {query}")
-        search_url = f"https://newsapi.org/v2/everything?q={query}&pageSize=5&apiKey={NEWSAPI_KEY}"  # Limiting results to 5
+        search_url = f"https://newsapi.org/v2/everything?q={query}&pageSize=5&apiKey={NEWSAPI_KEY}"
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -254,13 +259,13 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching news trends: {str(e)}")
         return []
 
-# Fetch Google Search trends (Limit to 5 results)
+# Fetch Google Search trends (Limited to 5 results)
 @rate_limited(1.0)
 def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch Google Custom Search results matching the query."""
     try:
         logger.info(f"Fetching Google search trends for query: {query}")
-        search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&num=5&key={GOOGLE_API_KEY}&cx={GOOGLE_CSE_ID}"  # Limiting results to 5
+        search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&num=5&key={GOOGLE_API_KEY}&cx={GOOGLE_CSE_ID}"
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -286,7 +291,7 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching Google trends: {str(e)}")
         return []
 
-# Fetch Twitter trends (Limit to 5 results)
+# Fetch Twitter trends (Limited to 5 results)
 @rate_limited(1.0)
 def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending tweets matching the query using OAuth1."""
@@ -337,7 +342,7 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching Twitter trends: {str(e)}")
         return []
 
-# Fetch Reddit trends (Limit to 5 results)
+# Fetch Reddit trends (Limited to 5 results)
 @rate_limited(1.0)
 def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending Reddit posts matching the query."""
