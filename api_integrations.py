@@ -44,8 +44,7 @@ REDDIT_SECRET = os.getenv("REDDIT_SECRET")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 
 # Rate limit configuration
-last_called = 0
-rate_limit_seconds = 1  # 1 second between API calls
+last_called = 0  # Initialize as global
 
 def rate_limited(max_per_second: float):
     """Rate limit decorator."""
@@ -54,13 +53,13 @@ def rate_limited(max_per_second: float):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            nonlocal last_called
+            global last_called  # Use global variable
             elapsed = time.time() - last_called
             wait_time = min_interval - elapsed
             
             if wait_time > 0:
                 time.sleep(wait_time)
-            last_called = time.time()
+            last_called = time.time()  # Update the last called time
             return func(*args, **kwargs)
         
         return wrapper
