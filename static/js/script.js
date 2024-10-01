@@ -103,36 +103,46 @@ async function sendMessage(message) {
         typingBubble.remove();
 
         if (data.data && data.data.general_summary && data.data.dynamic_response && data.data.results) {
-            const formattedResponse = formatResponse(data.data);
-            createChatBubble(formattedResponse, 'kachifo');
+            let combinedResponse = `${data.data.general_summary} ${data.data.dynamic_response}`;
+
+            const getFriendlySourceName = (source) => {
+                const sourceMap = {
+                    'YouTube': 'a popular video',
+                    'NewsAPI': 'a recent news article',
+                    'Google': 'a web search result',
+                    'Twitter': 'a trending tweet',
+                    'Reddit': 'a discussion on Reddit'
+                };
+                return sourceMap[source] || 'an interesting source';
+            };
+
+            data.data.results.forEach(item => {
+                combinedResponse += `\n\nI found ${getFriendlySourceName(item.source)} that might interest you: <strong>${item.title}</strong>. ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more here</a>.`;
+            });
+
+            combinedResponse += "\n\nIs there any specific aspect of these trends you'd like to explore further? Or perhaps you have another topic in mind?";
+
+            createChatBubble(combinedResponse, 'kachifo');
         } else if (data.error) {
-            createChatBubble(`Error: ${data.error}`, 'kachifo');
+            createChatBubble(`I'm sorry, but I encountered an issue while searching: ${data.error}. Could you try rephrasing your query or asking about something else?`, 'kachifo');
         } else {
-            createChatBubble('Received an unexpected response format.', 'kachifo');
+            createChatBubble("I apologize, but I'm having trouble processing that request right now. Could you try asking something else?", 'kachifo');
             console.error('Unexpected response format:', data);
         }
     } catch (error) {
         console.error('Error:', error);
         typingBubble.remove();
-        createChatBubble('Something went wrong. Please try again.', 'kachifo');
+        createChatBubble("I'm sorry, but something went wrong on my end. Could we try that again?", 'kachifo');
     }
 }
 
-// Function to format the response in a more conversational manner
-function formatResponse(data) {
-    let response = `${data.general_summary} ${data.dynamic_response}\n\n`;
-    response += "Here's what I found:\n\n";
-
-    data.results.forEach((item, index) => {
-        response += `<strong>${index + 1}. ${item.title}</strong>\n`;
-        response += `${item.summary}\n`;
-        if (item.url) {
-            response += `<a href="${item.url}" target="_blank" rel="noopener noreferrer">Learn more</a>\n`;
-        }
-        response += '\n';
-    });
-
-    return response;
+// Function to reset the chat
+function resetChat() {
+    chatWindow.innerHTML = '';
+    initialView.classList.remove('hidden');
+    suggestions.classList.remove('hidden');
+    chatWindow.classList.remove('active');
+    scrollToBottom();
 }
 
 // Function to check if the user is on a desktop
@@ -175,15 +185,6 @@ document.querySelectorAll('.suggestion').forEach(suggestion => {
 
 // Event listener for the New Chat icon
 newChatIcon.addEventListener('click', resetChat);
-
-// Function to reset the chat
-function resetChat() {
-    chatWindow.innerHTML = '';
-    initialView.classList.remove('hidden');
-    suggestions.classList.remove('hidden');
-    chatWindow.classList.remove('active');
-    scrollToBottom();
-}
 
 // Initial scroll to bottom on page load
 scrollToBottom();
