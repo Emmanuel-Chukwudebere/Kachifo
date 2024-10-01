@@ -105,7 +105,7 @@ async function sendMessage(message) {
             const formattedResponse = data.data.results.map(item => `
                 <strong>${item.source}:</strong> ${item.title}
                 <br>Summary: ${item.summary}
-                <br>URL: <a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a>
+                ${item.url ? `<br>URL: <a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a>` : '<br>URL: Not available'}
                 <br><br>Entities: ${item.entities.join(', ')}
                 <br>Verbs: ${item.verbs.join(', ')}
                 <br>Nouns: ${item.nouns.join(', ')}
