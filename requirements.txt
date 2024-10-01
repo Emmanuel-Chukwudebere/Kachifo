@@ -6,9 +6,12 @@ scipy
 pandas
 spacy
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.5.0/en_core_web_sm-3.5.0.tar.gz
+
+accelerate
 aiohttp
 aioflask
 annotated-types
+bitsandbytes
 blinker
 cachelib
 cachetools
@@ -18,6 +21,7 @@ charset-normalizer
 click
 colorama
 cryptography
+datasets
 distro
 Flask
 Flask[async]
@@ -41,6 +45,7 @@ itsdangerous
 Jinja2
 jiter
 MarkupSafe
+onnxruntime
 praw
 prawcore
 proto-plus
@@ -61,11 +66,14 @@ rsa
 sentry-sdk
 sniffio
 SQLAlchemy
+tensorflow
 thinc
+tokenizers
 torch
 torchaudio
 torchvision
 tqdm
+transformers
 tweepy
 typing_extensions
 update-checker
@@ -73,4 +81,3 @@ uritemplate
 urllib3
 websocket-client
 Werkzeug
-
