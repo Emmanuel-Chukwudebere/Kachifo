@@ -68,8 +68,7 @@ function createChatBubble(message, sender, isTyping = false) {
 }
 
 // Function to handle sending a message
-async function sendMessage(message) {
-    if (!message) {
+if (!message) {
         message = userInput.value.trim();
     }
     if (message === '') return;
@@ -77,7 +76,6 @@ async function sendMessage(message) {
     createChatBubble(message, 'user');
     userInput.value = '';
     userInput.style.height = 'auto';
-
     initialView.classList.add('hidden');
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
@@ -102,28 +100,40 @@ async function sendMessage(message) {
         typingBubble.remove();
 
         if (data.data && data.data.general_summary && data.data.dynamic_response && data.data.results) {
-            const formattedResponse = `
-                <strong>General Summary:</strong><br>${data.data.general_summary}<br><br>
-                <strong>Dynamic Response:</strong><br>${data.data.dynamic_response}<br><br>
-                <strong>Detailed Results:</strong><br>
-                ${data.data.results.map(item => `
-                    <strong>${item.source}:</strong> ${item.title}
-                    <br>Summary: ${item.summary}
-                    ${item.url ? `<br>URL: <a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a>` : '<br>URL: Not available'}
-                    <br><br>
-                `).join('')}
-            `;
-            createChatBubble(formattedResponse, 'kachifo');
+            // Combine general summary and dynamic response
+            let combinedResponse = `${data.data.general_summary} ${data.data.dynamic_response}`;
+
+            // Function to get a friendly name for the source
+            const getFriendlySourceName = (source) => {
+                const sourceMap = {
+                    'YouTube': 'a popular video',
+                    'NewsAPI': 'a recent news article',
+                    'Google': 'a web search result',
+                    'Twitter': 'a trending tweet',
+                    'Reddit': 'a discussion on Reddit'
+                };
+                return sourceMap[source] || 'an interesting source';
+            };
+
+            // Integrate detailed results into the response
+            data.data.results.forEach(item => {
+                combinedResponse += `\n\nI found ${getFriendlySourceName(item.source)} that might interest you: <strong>${item.title}</strong>. ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more here</a>.`;
+            });
+
+            // Add a human-like conclusion
+            combinedResponse += "\n\nIs there any specific aspect of these trends you'd like to explore further? Or perhaps you have another topic in mind?";
+
+            createChatBubble(combinedResponse, 'kachifo');
         } else if (data.error) {
-            createChatBubble(`Error: ${data.error}`, 'kachifo');
+            createChatBubble(`I'm sorry, but I encountered an issue while searching: ${data.error}. Could you try rephrasing your query or asking about something else?`, 'kachifo');
         } else {
-            createChatBubble('Received an unexpected response format.', 'kachifo');
+            createChatBubble("I apologize, but I'm having trouble processing that request right now. Could you try asking something else?", 'kachifo');
             console.error('Unexpected response format:', data);
         }
     } catch (error) {
         console.error('Error:', error);
         typingBubble.remove();
-        createChatBubble('Something went wrong. Please try again.', 'kachifo');
+        createChatBubble("I'm sorry, but something went wrong on my end. Could we try that again?", 'kachifo');
     }
 }
 
