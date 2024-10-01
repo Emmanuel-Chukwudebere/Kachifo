@@ -333,37 +333,50 @@ def process_query():
         
         # Fetch trending topics or perform search
         results = fetch_trending_topics(query)
-        logger.debug(f"Fetched {len(results)} results")
+        
+        # Log the complete set of results as a string (use repr to show structure)
+        logger.debug(f"Fetched results (full): {repr(results)}")
+        logger.debug(f"Number of results fetched: {len(results)}")
         
         processed_results = []
         for result in results:
             if isinstance(result, dict):
+                # Process dictionary results as usual
                 result_text = f"{result.get('title', '')} {result.get('summary', '')}"
                 processed_result_data = process_query_with_spacy(result_text)
                 
-                # Safely get the 'url', set to None if missing
                 processed_result = {
-                    'source': result.get('source', 'Unknown'),  # Fallback to 'Unknown' if source is missing
-                    'title': result.get('title', 'No Title'),  # Fallback to 'No Title' if title is missing
-                    'summary': result.get('summary', 'No Summary'),  # Fallback to 'No Summary' if summary is missing
-                    'url': result.get('url', None),  # Set to None if URL is missing
+                    'source': result.get('source', 'Unknown'),
+                    'title': result.get('title', 'No Title'),
+                    'summary': result.get('summary', 'No Summary'),
+                    'url': result.get('url', None),
                     'entities': processed_result_data['entities'],
                     'verbs': processed_result_data['verbs'],
                     'nouns': processed_result_data['nouns']
                 }
                 processed_results.append(processed_result)
                 
-                # Log important fields
+                # Log important fields for each dictionary result
                 logger.info(f"Processed result: Source: {processed_result['source']}, Title: {processed_result['title']}, URL: {processed_result['url'] or 'No URL'}")
-                logger.debug(f"Summary: {processed_result['summary']}")
             else:
-                # For non-dict results, just log them and serialize as text
-                processed_results.append({'text': str(result)})
-                logger.warning(f"Non-dict result encountered: {result}")
+                # Convert non-dict result to a dictionary with placeholders
+                logger.warning(f"Non-dict result encountered: {repr(result)}")
+                processed_result = {
+                    'source': 'Unknown',  # Placeholder source
+                    'title': 'No Title',  # Placeholder title
+                    'summary': str(result),  # Use the non-dict result as the summary
+                    'url': None,  # No URL available for non-dict results
+                    'entities': [],  # No entities available
+                    'verbs': [],
+                    'nouns': []
+                }
+                processed_results.append(processed_result)
+                # Log the newly converted result
+                logger.info(f"Converted non-dict result: {processed_result}")
 
         logger.debug(f"Processed {len(processed_results)} results")
         
-        # Log sample data from the first result
+        # Log sample data from the first result, if available
         if processed_results:
             first_result = processed_results[0]
             logger.info(f"Sample Result - Source: {first_result.get('source', 'Unknown')}, Title: {first_result.get('title', 'No Title')}, URL: {first_result.get('url') if first_result.get('url') else 'No URL'}")
