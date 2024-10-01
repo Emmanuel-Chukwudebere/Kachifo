@@ -293,40 +293,42 @@ def recent_searches():
 @rate_limit
 def process_query():
     try:
+        logger.debug("Received request to /process-query")
         if request.is_json:
             query = request.json.get('q')
         else:
             query = request.form.get('q')
         
+        logger.info(f"Processing query: {query}")
+        
         if not query:
-            current_app.logger.warning(f"Query is missing. Headers: {request.headers}, Data: {request.data}")
+            logger.warning("Query is missing")
             return create_standard_response({'error': 'Query is required'}, 400, "Query is required")
-
+        
         query = sanitize_input(query)
-        current_app.logger.info(f"Processing query: {query}")
-
+        logger.debug(f"Sanitized query: {query}")
+        
         # Process the user's search query with spaCy
         processed_query_data = process_query_with_spacy(query)
-
+        logger.debug(f"Processed query data: {processed_query_data}")
+        
         # Store the user's query with spaCy data
-        new_query = UserQuery(
-            query=query,
-            entities=str(processed_query_data['entities']),
-            verbs=str(processed_query_data['verbs']),
-            nouns=str(processed_query_data['nouns'])
-        )
+        new_query = UserQuery(query=query)
+        new_query.set_spacy_data(processed_query_data)
         db.session.add(new_query)
         db.session.commit()
-
+        logger.info("Query stored in database")
+        
         # Fetch trending topics or perform search
         results = fetch_trending_topics(query)
+        logger.debug(f"Fetched {len(results)} results")
         
         processed_results = []
         for result in results:
             if isinstance(result, dict):
                 result_text = f"{result.get('title', '')} {result.get('summary', '')}"
                 processed_result_data = process_query_with_spacy(result_text)
-                processed_results.append({
+                processed_result = {
                     'source': result.get('source', ''),
                     'title': result.get('title', ''),
                     'summary': result.get('summary', ''),
@@ -334,21 +336,25 @@ def process_query():
                     'entities': processed_result_data['entities'],
                     'verbs': processed_result_data['verbs'],
                     'nouns': processed_result_data['nouns']
-                })
+                }
+                processed_results.append(processed_result)
+                logger.debug(f"Processed result: {processed_result}")
             else:
                 processed_results.append({
                     'text': str(result)
                 })
-
-        # Log processed results to debug serialization issues
-        logger.info(f"Processed results: {processed_results}")
-
-        # Return JSON-serializable response
-        return create_standard_response({
+                logger.debug(f"Non-dict result: {result}")
+        
+        logger.debug(f"Processed {len(processed_results)} results")
+        logger.info(f"Sample URL from results: {processed_results[0]['url'] if processed_results else 'No results'}")
+        
+        response_data = {
             'query': processed_query_data,
             'results': processed_results
-        }, 200, "Query processed successfully")
-
+        }
+        logger.info("Sending response")
+        return create_standard_response(response_data, 200, "Query processed successfully")
+    
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
