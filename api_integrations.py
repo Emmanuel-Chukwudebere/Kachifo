@@ -79,8 +79,8 @@ def process_user_input(user_input: str) -> str:
 # Process text with SpaCy to create a meaningful summary
 def process_text_with_spacy(text: str) -> str:
     """
-    Processes text with SpaCy to filter tokens, returning a summary made of the first 30 
-    meaningful tokens. Limits text length to avoid memory overload.
+    Processes text with SpaCy to filter tokens, returning a summary made of the first 30 meaningful tokens.
+    Limits text length to avoid memory overload.
     """
     text = text[:1000]  # Limit the text length to 1000 characters
     original_length = len(text)
@@ -103,7 +103,6 @@ def process_text_with_spacy(text: str) -> str:
 def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) -> str:
     """Generate a dynamic response using SpaCy analysis of user input and API results."""
     doc = nlp(user_input)
-
     main_topic = next((token.text for token in doc if token.pos_ in ['NOUN', 'PROPN']), "this topic")
     
     # Generate introduction
@@ -124,7 +123,8 @@ def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) ->
 
     response += conclusion
     return response
-    
+
+# Generate a general summary from combined summaries
 def generate_general_summary(summaries: List[str]) -> str:
     if not summaries:
         return "No meaningful summaries could be generated from the current trends."
@@ -153,7 +153,7 @@ def generate_general_summary(summaries: List[str]) -> str:
 
     return " ".join(summary_parts)
 
-# Cache API results  # Rate limit to 1 request per second
+# Cache API results
 @cached(cache)
 @rate_limited(1.0)
 def fetch_trending_topics(user_input: str) -> str:
@@ -303,7 +303,6 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
         logger.info(f"Fetching Twitter trends for query: {query}")
         
         search_url = "https://api.twitter.com/2/tweets/search/recent"
-
         auth = OAuth1(
             client_key=TWITTER_API_KEY,
             client_secret=TWITTER_API_SECRET_KEY,
@@ -366,7 +365,7 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
         
         # Use token to get trends
         headers['Authorization'] = f'bearer {token}'
-        search_url = f"https://oauth.reddit.com/r/all/search?q={query}&sort=relevance&t=week&limit=5"
+        search_url = f"https://oauth.reddit.com/r/all/search?q={query}&sort=relevance&t=week&limit=5"  # Limiting results to 5
         response = requests.get(search_url, headers=headers, timeout=10)
         response.raise_for_status()
         posts = response.json()['data']['children']
@@ -383,7 +382,7 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
                     'source': 'Reddit',
                     'title': title,
                     'summary': summary,
-                    'url': url,
+                    'url': url
                 })
 
         logger.info(f"Fetched {len(results)} Reddit trends.")
