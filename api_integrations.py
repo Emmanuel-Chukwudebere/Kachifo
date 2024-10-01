@@ -101,57 +101,34 @@ def process_text_with_spacy(text: str) -> str:
 
 # Generate a dynamic response
 def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) -> str:
-    """Generate a dynamic response using SpaCy analysis of user input and API results."""
     doc = nlp(user_input)
     main_topic = next((token.text for token in doc if token.pos_ in ['NOUN', 'PROPN']), "this topic")
     
-    # Generate introduction
-    intro = f"Here's what I discovered about {main_topic}:\n\n"
-
-    response = f"{intro}"
-
-    for result in results:
-        response += f"📌 {result['source']}: {result['title']}\n"
-        response += f"   {result['summary']}\n"
-        response += f"   More at: {result['url']}\n\n"
-
-    # Generate a conclusion
-    if len(results) > 5:
-        conclusion = f"Wow, there's a lot of buzz around {main_topic}! Which aspect interests you most?"
-    else:
-        conclusion = f"These are the top trends for {main_topic}. Would you like to explore any specific area further?"
-
-    response += conclusion
+    response = f"I've found some interesting information about {main_topic}. "
+    response += "Here's a quick overview of what I discovered:\n\n"
+    
+    for result in results[:5]:  # Limit to top 5 results for brevity
+        response += f"- {result['title']}\n"
+    
+    response += f"\nWould you like me to elaborate on any specific aspect of {main_topic}?"
     return response
 
-# Generate a general summary from combined summaries
 def generate_general_summary(summaries: List[str]) -> str:
     if not summaries:
-        return "No meaningful summaries could be generated from the current trends."
+        return "I couldn't find any relevant trends for your query. Can you try rephrasing or asking about a different topic?"
 
-    # Combine summaries into a single text
     combined_text = " ".join(summaries)
     combined_doc = nlp(combined_text)
 
-    # Extract key phrases and entities
-    key_phrases = [chunk.text for chunk in combined_doc.noun_chunks if len(chunk) > 1]
-    key_entities = [ent.text for ent in combined_doc.ents if ent.label_ in ['PERSON', 'ORG', 'GPE', 'EVENT']]
+    key_phrases = list(dict.fromkeys([chunk.text for chunk in combined_doc.noun_chunks if len(chunk) > 1]))[:5]
+    key_entities = list(dict.fromkeys([ent.text for ent in combined_doc.ents if ent.label_ in ['PERSON', 'ORG', 'GPE', 'EVENT']]))[:5]
 
-    # Remove duplicates and limit to top 5
-    key_phrases = list(dict.fromkeys(key_phrases))[:5]
-    key_entities = list(dict.fromkeys(key_entities))[:5]
-
-    # Generate a structured summary
-    summary_parts = []
-    if key_phrases:
-        summary_parts.append(f"The main topics discussed are: {', '.join(key_phrases)}.")
+    summary = f"Based on the latest trends, {', '.join(key_phrases)} seem to be hot topics. "
     if key_entities:
-        summary_parts.append(f"Key entities mentioned include: {', '.join(key_entities)}.")
+        summary += f"Key names that come up include {', '.join(key_entities)}. "
+    summary += "Let me know if you want to dive deeper into any of these areas!"
 
-    # Add a general statement about the trends
-    summary_parts.append("These trends reflect recent discussions and popular content across various platforms.")
-
-    return " ".join(summary_parts)
+    return summary
 
 # Cache API results
 @cached(cache)
@@ -161,7 +138,7 @@ def fetch_trending_topics(user_input: str) -> str:
         logger.info(f"Processing user input: {user_input}")
         query = process_user_input(user_input)
         logger.info(f"Extracted query: {query}")
-        
+
         # Fetch results from each API
         results = (
             fetch_youtube_trends(query) +
@@ -170,30 +147,30 @@ def fetch_trending_topics(user_input: str) -> str:
             fetch_reddit_trends(query) +
             fetch_google_trends(query)
         )
-        
+
         # Filter valid results using list comprehension
         valid_results = [result for result in results if isinstance(result, dict) and result.get('title') and result.get('summary')]
-        
+
         if not valid_results:
             logger.warning("No valid results were found after filtering.")
             return json.dumps({"error": "No relevant trends found for the query. Please try again with a different topic."})
-        
+
         # Generate summaries for valid results
         individual_summaries = [result['summary'] for result in valid_results]
-        
+
         # Generate the general summary from individual summaries
         general_summary = generate_general_summary(individual_summaries)
-        
+
         # Generate dynamic response with individual results
         dynamic_response = generate_dynamic_response(user_input, valid_results)
-        
+
         # Combine the general summary with the dynamic response and individual results
         response = {
             "general_summary": general_summary,
             "dynamic_response": dynamic_response,
             "results": valid_results[:5]  # Limit to top 5 results
         }
-        
+
         return json.dumps(response)
     except Exception as e:
         logger.error(f"Unexpected error during processing: {str(e)}", exc_info=True)
@@ -251,7 +228,7 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
 
             if title and summary and article_url:
                 results.append({
-                    'source': 'NewsAPI',
+                    'source': 'News Article',
                     'title': title,
                     'summary': summary,
                     'url': article_url,
