@@ -73,9 +73,7 @@ async function sendMessage(message) {
         message = userInput.value.trim();
     }
     if (message === '') return;
-
     console.log('Search initiated', { query: message, timestamp: new Date().toISOString() });
-
     createChatBubble(message, 'user');
     userInput.value = '';
     userInput.style.height = 'auto';
@@ -88,7 +86,7 @@ async function sendMessage(message) {
 
     try {
         const response = await fetch('/process-query', {
-            method: 'POST',  // Using POST to send queries
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
@@ -103,16 +101,21 @@ async function sendMessage(message) {
         const data = await response.json();
         typingBubble.remove();
 
-        if (Array.isArray(data)) {
-            // Assuming the response is an array of results
-            const formattedResponse = data.map(item => 
-                `${item.source}: ${item.title}\nSummary: ${item.summary}\nURL: ${item.url}\n\nEntities: ${item.entities.join(', ')}\nVerbs: ${item.verbs.join(', ')}\nNouns: ${item.nouns.join(', ')}`
-            ).join('\n\n');
+        if (data.data && data.data.results) {
+            const formattedResponse = data.data.results.map(item => `
+                <strong>${item.source}:</strong> ${item.title}
+                <br>Summary: ${item.summary}
+                <br>URL: <a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a>
+                <br><br>Entities: ${item.entities.join(', ')}
+                <br>Verbs: ${item.verbs.join(', ')}
+                <br>Nouns: ${item.nouns.join(', ')}
+            `).join('<hr>');
             createChatBubble(formattedResponse, 'kachifo');
         } else if (data.error) {
             createChatBubble(`Error: ${data.error}`, 'kachifo');
         } else {
             createChatBubble('Received an unexpected response format.', 'kachifo');
+            console.error('Unexpected response format:', data);
         }
     } catch (error) {
         console.error('Error:', error);
