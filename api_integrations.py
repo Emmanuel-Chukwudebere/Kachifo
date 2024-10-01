@@ -121,6 +121,26 @@ def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) ->
     response += conclusion
     return response
 
+# Generate a general summary from combined summaries
+def generate_general_summary(summaries: List[str]) -> str:
+    """
+    Generates a conversational general summary using SpaCy by combining summaries.
+    """
+    if not summaries:
+        return "No meaningful summaries could be generated from the current trends."
+    
+    combined_text = " ".join(summaries)
+    combined_doc = nlp(combined_text)
+
+    # Extract key sentences to make a meaningful summary
+    key_sentences = []
+    for sent in combined_doc.sents:
+        key_sentences.append(sent.text)
+
+    # Generate a summary using the first few key sentences
+    general_summary = " ".join(key_sentences[:3])  # Adjust the number of sentences as needed
+    return general_summary if general_summary.strip() else "No meaningful trends were identified."
+
 # Cache API results
 @cached(cache)
 @rate_limited(1.0)  # Rate limit to 1 request per second
@@ -148,8 +168,19 @@ def fetch_trending_topics(user_input: str) -> str:
         if not valid_results:
             return f"I couldn't find any relevant trends about {query} at the moment. Could you try rephrasing your query or exploring a different topic?"
         
-        # Generate dynamic response
-        return generate_dynamic_response(user_input, valid_results)
+        # Generate summaries for valid results
+        individual_summaries = [result['summary'] for result in valid_results]
+        
+        # Generate the general summary from individual summaries
+        general_summary = generate_general_summary(individual_summaries)
+
+        # Log the generated general summary
+        logger.info(f"Generated general summary: {general_summary}")
+
+        # Generate dynamic response with individual results
+        response = generate_dynamic_response(user_input, valid_results)
+        
+        return json.dumps({"general_summary": general_summary, "individual_results": response})
     except RequestException as e:
         logger.error(f"Error fetching trending topics: {str(e)}", exc_info=True)
         return f"I apologize, but I encountered an unexpected issue while fetching trends about {query}. Could we try again with a different query?"
