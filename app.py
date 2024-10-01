@@ -11,6 +11,7 @@ from api_integrations import fetch_trending_topics
 from werkzeug.exceptions import HTTPException, BadRequest
 from sqlalchemy.exc import SQLAlchemyError
 import spacy
+import json
 
 # Initialize spaCy model
 nlp = spacy.load('en_core_web_sm')
@@ -58,11 +59,18 @@ class UserQuery(db.Model):
     verbs = db.Column(db.Text, nullable=True)
     nouns = db.Column(db.Text, nullable=True)
     timestamp = db.Column(db.DateTime, default=db.func.now())
-    
+
     def set_spacy_data(self, processed_data):
         self.entities = json.dumps(processed_data['entities'])
         self.verbs = json.dumps(processed_data['verbs'])
         self.nouns = json.dumps(processed_data['nouns'])
+
+    def get_spacy_data(self):
+        return {
+            'entities': json.loads(self.entities) if self.entities else [],
+            'verbs': json.loads(self.verbs) if self.verbs else [],
+            'nouns': json.loads(self.nouns) if self.nouns else []
+        }
 
 # Advanced logging setup
 def setup_logging():
