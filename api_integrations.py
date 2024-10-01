@@ -279,7 +279,7 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
                 'source': 'Twitter',
                 'title': f"Tweet by @{username}",
                 'summary': summary,
-                'url': f"https://twitter.com/{username}/status/{tweet['id']}" if f"https://twitter.com/{username}/status/{tweet['id']}" else '',  # Ensure the 'url' field is always included
+                'url': f"https://twitter.com/{username}/status/{tweet['id']}" if username and tweet['id'] else ''
             })
 
         logger.info(f"Fetched {len(results)} Twitter trends.")
