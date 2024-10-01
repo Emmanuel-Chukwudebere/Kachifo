@@ -102,15 +102,17 @@ async function sendMessage(message) {
         typingBubble.remove();
 
         if (data.data && data.data.results) {
-            const formattedResponse = data.data.results.map(item => `
+            const formattedResponse = `
+            <strong>General Summary:</strong><br>${data.general_summary}<br><br>
+            ${data.results.map(item => `
                 <strong>${item.source}:</strong> ${item.title}
                 <br>Summary: ${item.summary}
                 ${item.url ? `<br>URL: <a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.url}</a>` : '<br>URL: Not available'}
-                <br><br>Entities: ${item.entities.join(', ')}
-                <br>Verbs: ${item.verbs.join(', ')}
-                <br>Nouns: ${item.nouns.join(', ')}
-            `).join('<hr>');
-            createChatBubble(formattedResponse, 'kachifo');
+                <br><br>
+            `).join('')}
+        `;
+        createChatBubble(formattedResponse, 'kachifo');
+
         } else if (data.error) {
             createChatBubble(`Error: ${data.error}`, 'kachifo');
         } else {

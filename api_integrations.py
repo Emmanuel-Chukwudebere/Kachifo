@@ -84,28 +84,40 @@ def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) ->
 
 # Cache API results
 @cached(cache)
-def fetch_trending_topics(user_input: str) -> str:
+def fetch_trending_topics(user_input: str) -> List[Dict[str, Any]]:
     try:
         logger.info(f"Processing user input: {user_input}")
         query = process_user_input(user_input)
         logger.info(f"Extracted query: {query}")
         results = []
-        results.extend(fetch_youtube_trends(query))
-        results.extend(fetch_news_trends(query))
-        results.extend(fetch_twitter_trends(query))
-        results.extend(fetch_reddit_trends(query))
-        results.extend(fetch_google_trends(query))
-        # Limit to first 10 results
+        
+        # Fetch results from each API
+        youtube_results = fetch_youtube_trends(query)
+        news_results = fetch_news_trends(query)
+        twitter_results = fetch_twitter_trends(query)
+        reddit_results = fetch_reddit_trends(query)
+        google_results = fetch_google_trends(query)
+        
+        # Filter out any empty or malformed results
+        for result_set in [youtube_results, news_results, twitter_results, reddit_results, google_results]:
+            for result in result_set:
+                if isinstance(result, dict) and result.get('title') and result.get('summary'):
+                    results.append(result)
+                else:
+                    logger.warning(f"Skipped invalid result: {repr(result)}")
+        
+        # Limit to the first 10 valid results
         results = results[:10]
         
         if not results:
             return f"I couldn't find any relevant trends about {query} at the moment. Could you try rephrasing your query or exploring a different topic?"
-        
+
         # Generate dynamic response
         return generate_dynamic_response(user_input, results)
     except Exception as e:
         logger.error(f"Error fetching trending topics: {str(e)}", exc_info=True)
         return f"I apologize, but I encountered an unexpected issue while fetching trends about {query}. Could we try again with a different query?"
+
 
 def generate_dynamic_response(user_input: str, results: List[Dict[str, Any]]) -> str:
     """Generate a dynamic response using SpaCy analysis of user input and API results."""
@@ -154,15 +166,19 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
             title = item['snippet']['title']
             description = item['snippet']['description']
             video_url = f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-            # Extract first sentence of description as summary (convert spaCy Span to string)
-            summary = str(next(nlp(description).sents))  # Get first sentence as summary (convert to string)
+            # Extract first sentence of description as summary
+            summary = str(next(nlp(description).sents)) if description else title  # Use title if no description
 
-            results.append({
-                'source': 'YouTube',
-                'title': title,
-                'summary': summary,
-                'url': video_url if video_url else '',  # Ensure the 'url' field is always included
-            })
+            # Ensure the 'url' field is valid and include meaningful summaries
+            if title and summary and video_url:
+                results.append({
+                    'source': 'YouTube',
+                    'title': title,
+                    'summary': summary,
+                    'url': video_url,
+                })
+            else:
+                logger.warning(f"Skipped YouTube result due to missing data: {repr(item)}")
 
         logger.info(f"Fetched {len(results)} YouTube trends.")
         return results
@@ -185,15 +201,17 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
             title = article['title']
             content = article['content'] or article['description']
             article_url = article['url']
-            # Extract first sentence of description as summary (convert spaCy Span to string)
-            summary = str(next(nlp(content).sents))  # Get first sentence as summary (convert to string)
+            summary = str(next(nlp(content).sents)) if content else title  # Use title if no content
 
-            results.append({
-                'source': 'NewsAPI',
-                'title': title,
-                'summary': summary,
-                'url': article_url if article_url else '',  # Ensure the 'url' field is always included
-            })
+            if title and summary and article_url:
+                results.append({
+                    'source': 'NewsAPI',
+                    'title': title,
+                    'summary': summary,
+                    'url': article_url,
+                })
+            else:
+                logger.warning(f"Skipped NewsAPI result due to missing data: {repr(article)}")
 
         logger.info(f"Fetched {len(results)} news trends.")
         return results
@@ -216,15 +234,17 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
             title = item['title']
             snippet = item['snippet']
             link = item['link']
-            # Extract first sentence of description as summary (convert spaCy Span to string)
-            summary = str(next(nlp(snippet).sents))  # Get first sentence as summary (convert to string)
+            summary = str(next(nlp(snippet).sents)) if snippet else title  # Use title if no snippet
 
-            results.append({
-                'source': 'Google',
-                'title': title,
-                'summary': summary,
-                'url': link if link else '',  # Ensure the 'url' field is always included
-            })
+            if title and summary and link:
+                results.append({
+                    'source': 'Google',
+                    'title': title,
+                    'summary': summary,
+                    'url': link,
+                })
+            else:
+                logger.warning(f"Skipped Google result due to missing data: {repr(item)}")
 
         logger.info(f"Fetched {len(results)} Google trends.")
         return results
@@ -237,54 +257,43 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending tweets matching the query using OAuth1."""
     try:
         logger.info(f"Fetching Twitter trends for query: {query}")
-        
-        # Twitter API v2 search endpoint
         search_url = "https://api.twitter.com/2/tweets/search/recent"
-        
-        # Set up OAuth1 for signing requests with user credentials
         auth = OAuth1(
             client_key=TWITTER_API_KEY,
             client_secret=TWITTER_API_SECRET_KEY,
             resource_owner_key=TWITTER_ACCESS_TOKEN,
             resource_owner_secret=TWITTER_ACCESS_TOKEN_SECRET
         )
-
-        # Parameters for the API request
         params = {
             'query': query,
             'tweet.fields': 'text,author_id,created_at',
             'expansions': 'author_id',
             'user.fields': 'username'
         }
-        
-        # Make the request to Twitter API
         response = requests.get(search_url, params=params, auth=auth)
-        response.raise_for_status()  # Raise an error for bad responses
-
+        response.raise_for_status()
         data = response.json()
 
         results = []
         for tweet in data.get('data', []):
             tweet_text = tweet['text']
             author_id = tweet['author_id']
-            
-            # Find the author details from the expansions field
             author = next((user for user in data.get('includes', {}).get('users', []) if user['id'] == author_id), None)
             username = author['username'] if author else "Unknown"
-            
-            # Use the first sentence as a summary (or use full text if short)
             summary = str(next(nlp(tweet_text).sents)) if len(tweet_text) > 100 else tweet_text
 
-            results.append({
-                'source': 'Twitter',
-                'title': f"Tweet by @{username}",
-                'summary': summary,
-                'url': f"https://twitter.com/{username}/status/{tweet['id']}" if username and tweet['id'] else ''
-            })
+            if username and summary and tweet['id']:
+                results.append({
+                    'source': 'Twitter',
+                    'title': f"Tweet by @{username}",
+                    'summary': summary,
+                    'url': f"https://twitter.com/{username}/status/{tweet['id']}"
+                })
+            else:
+                logger.warning(f"Skipped Twitter result due to missing data: {repr(tweet)}")
 
         logger.info(f"Fetched {len(results)} Twitter trends.")
         return results
-
     except RequestException as e:
         logger.error(f"Error fetching Twitter trends: {str(e)}")
         return []
@@ -296,15 +305,15 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
         logger.info(f"Fetching Reddit trends for query: {query}")
         auth = requests.auth.HTTPBasicAuth(REDDIT_CLIENT_ID, REDDIT_SECRET)
         headers = {'User-Agent': REDDIT_USER_AGENT}
-        
+
         # Get token
-        response = requests.post('https://www.reddit.com/api/v1/access_token', 
-                                 auth=auth, 
+        response = requests.post('https://www.reddit.com/api/v1/access_token',
+                                 auth=auth,
                                  data={'grant_type': 'client_credentials'},
                                  headers=headers)
         response.raise_for_status()
         token = response.json()['access_token']
-        
+
         # Use token to get trends
         headers['Authorization'] = f'bearer {token}'
         search_url = f"https://oauth.reddit.com/r/all/search?q={query}&sort=relevance&t=week"
@@ -317,21 +326,20 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
             title = post['data']['title']
             selftext = post['data']['selftext']
             url = f"https://www.reddit.com{post['data']['permalink']}"
-            if selftext:
-        # Process the first 500 characters of selftext
-                doc = nlp(selftext[:500])
-        # Get the first sentence and convert it to a string
-                summary = str(next(doc.sents))
-            else:
-        # If no selftext, use the title as the summary
-                summary = str(title)
 
-            results.append({
-                'source': 'Reddit',
-                'title': title,
-                'summary': summary,
-                'url': url if url else '',  # Ensure the 'url' field is always included
-            })
+            # Process selftext, or use the title as the summary if no selftext
+            summary = str(next(nlp(selftext).sents)) if selftext else title
+
+            # Ensure the 'url' field is valid and the result contains a meaningful summary
+            if title and summary and url:
+                results.append({
+                    'source': 'Reddit',
+                    'title': title,
+                    'summary': summary,
+                    'url': url
+                })
+            else:
+                logger.warning(f"Skipped Reddit result due to missing data: {repr(post)}")
 
         logger.info(f"Fetched {len(results)} Reddit trends.")
         return results

@@ -171,6 +171,46 @@ def process_query_with_spacy(query):
         'verbs': verbs
     }
 
+def generate_conversational_summary_v2(summaries):
+    """
+    Generates a conversational general summary using spaCy by extracting key entities, verbs,
+    and context from the summaries.
+    """
+    if not summaries:
+        return "No meaningful summaries could be generated from the current trends."
+
+    # Combine all summaries into one large text
+    combined_text = " ".join(summaries)
+    
+    # Process the combined text using spaCy
+    doc = nlp(combined_text)
+
+    # Initialize lists for entities, verbs, and meaningful phrases
+    key_entities = []
+    key_phrases = []
+    key_verbs = []
+
+    # Extract entities, verbs, and key noun chunks
+    for ent in doc.ents:
+        key_entities.append(ent.text)
+    for token in doc:
+        if token.pos_ == 'VERB':
+            key_verbs.append(token.lemma_)
+    for chunk in doc.noun_chunks:
+        key_phrases.append(chunk.text)
+
+    # Build a conversational summary using the extracted information
+    summary = "The trending topics are focused on "
+    if key_entities:
+        summary += f"entities like {', '.join(set(key_entities[:5]))}. "
+    if key_phrases:
+        summary += f"Key areas of discussion include {', '.join(set(key_phrases[:5]))}. "
+    if key_verbs:
+        summary += f"The most common actions are {', '.join(set(key_verbs[:5]))}. "
+
+    return summary if summary.strip() else "No meaningful trends were identified."
+
+
 # Error handlers
 @app.errorhandler(HTTPException)
 def handle_http_error(e):
@@ -334,63 +374,53 @@ def process_query():
         # Fetch trending topics or perform search
         results = fetch_trending_topics(query)
         
-        # Log the complete set of results as a string (use repr to show structure)
+        # Log the complete set of results for inspection (use repr to show structure)
         logger.debug(f"Fetched results (full): {repr(results)}")
         logger.debug(f"Number of results fetched: {len(results)}")
         
+        # Processed results will hold valid dictionary results
         processed_results = []
+        
+        # Combine all summaries to generate a general summary
+        combined_summaries = []
+
+        # Filter meaningful results and log each API response
         for result in results:
-            if isinstance(result, dict):
-                # Process dictionary results as usual
-                result_text = f"{result.get('title', '')} {result.get('summary', '')}"
-                processed_result_data = process_query_with_spacy(result_text)
-                
-                processed_result = {
+            # Check if result is a dictionary with at least title or summary
+            if isinstance(result, dict) and (result.get('title') or result.get('summary')):
+                processed_results.append({
                     'source': result.get('source', 'Unknown'),
                     'title': result.get('title', 'No Title'),
                     'summary': result.get('summary', 'No Summary'),
-                    'url': result.get('url', None),
-                    'entities': processed_result_data['entities'],
-                    'verbs': processed_result_data['verbs'],
-                    'nouns': processed_result_data['nouns']
-                }
-                processed_results.append(processed_result)
+                    'url': result.get('url', None)  # Use None if no URL is available
+                })
+                # Add summary to combined list for general summary generation
+                if result.get('summary'):
+                    combined_summaries.append(result['summary'])
                 
-                # Log important fields for each dictionary result
-                logger.info(f"Processed result: Source: {processed_result['source']}, Title: {processed_result['title']}, URL: {processed_result['url'] or 'No URL'}")
+                # Log each meaningful result
+                logger.info(f"Processed result: Source: {result.get('source', 'Unknown')}, Title: {result.get('title', 'No Title')}, URL: {result.get('url') or 'No URL'}")
             else:
-                # Convert non-dict result to a dictionary with placeholders
-                logger.warning(f"Non-dict result encountered: {repr(result)}")
-                processed_result = {
-                    'source': 'Unknown',  # Placeholder source
-                    'title': 'No Title',  # Placeholder title
-                    'summary': str(result),  # Use the non-dict result as the summary
-                    'url': None,  # No URL available for non-dict results
-                    'entities': [],  # No entities available
-                    'verbs': [],
-                    'nouns': []
-                }
-                processed_results.append(processed_result)
-                # Log the newly converted result
-                logger.info(f"Converted non-dict result: {processed_result}")
+                # Log non-dict result (ignored for user-facing content)
+                logger.warning(f"Irrelevant result encountered and ignored: {repr(result)}")
 
-        logger.debug(f"Processed {len(processed_results)} results")
-        
-        # Log sample data from the first result, if available
-        if processed_results:
-            first_result = processed_results[0]
-            logger.info(f"Sample Result - Source: {first_result.get('source', 'Unknown')}, Title: {first_result.get('title', 'No Title')}, URL: {first_result.get('url') if first_result.get('url') else 'No URL'}")
-        else:
-            logger.info("No results to process")
-        
-        # Prepare response data
-        response_data = {
-            'query': processed_query_data,
+        # Limit the results to the top 10
+        processed_results = processed_results[:10]
+
+        # **Generate a conversational general summary from combined summaries using spaCy**
+        general_summary = generate_conversational_summary_v2(combined_summaries)
+
+        # Log the general summary for debugging
+        logger.info(f"Generated general summary: {general_summary}")
+
+        # Prepare the final output to the user
+        final_output = {
+            'general_summary': general_summary,
             'results': processed_results
         }
-
+        
         logger.info("Sending response")
-        return create_standard_response(response_data, 200, "Query processed successfully")
+        return create_standard_response(final_output, 200, "Query processed successfully")
     
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
