@@ -80,24 +80,25 @@ def process_user_input(user_input: str) -> str:
 def process_text_with_spacy(text: str) -> str:
     """
     Processes text with SpaCy to filter tokens, returning a summary made of the first 30 meaningful tokens.
+    Limits text length to avoid memory overload.
     """
+    # Limit the text length to 1000 characters before processing
+    text = text[:1000]
+    
     original_length = len(text)
     doc = nlp(text)
     
     # Filter out tokens that are too short, punctuation, or whitespace
     meaningful_tokens = [token.text for token in doc if len(token.text.strip()) > 1 and not token.is_punct]
 
-    # Log the original length and number of meaningful tokens
     logger.info(f"Original text length: {original_length}, Number of meaningful tokens: {len(meaningful_tokens)}")
     
-    # If no meaningful tokens, return an empty summary
     if not meaningful_tokens:
         return ""
     
     # Join the first 30 meaningful tokens to create a summary
     summary = " ".join(meaningful_tokens[:30])
     
-    logger.info(f"Generated summary: {summary}")
     return summary if summary.strip() else "No meaningful summary generated."
 
 # Generate a dynamic response
@@ -189,13 +190,13 @@ def fetch_trending_topics(user_input: str) -> str:
         logger.error(f"Unexpected error during processing: {str(e)}", exc_info=True)
         return json.dumps({"error": "An unexpected error occurred. Please try again later."})
 
-# Fetch YouTube trends
+# Fetch YouTube trends (Limit to 5 results)
 @rate_limited(1.0)
 def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending YouTube videos matching the query."""
     try:
         logger.info(f"Fetching YouTube trends for query: {query}")
-        search_url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&type=video&key={YOUTUBE_API_KEY}"
+        search_url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&type=video&maxResults=5&key={YOUTUBE_API_KEY}"  # Limiting results to 5
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -205,7 +206,7 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
             title = item['snippet']['title']
             description = item['snippet']['description']
             video_url = f"https://www.youtube.com/watch?v={item['id']['videoId']}"
-            summary = process_text_with_spacy(description)  # Use the new processing function
+            summary = process_text_with_spacy(description)
 
             if title and summary and video_url:
                 results.append({
@@ -214,8 +215,6 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
                     'summary': summary,
                     'url': video_url,
                 })
-            else:
-                logger.warning(f"Skipped YouTube result due to missing data: {repr(item)}")
 
         logger.info(f"Fetched {len(results)} YouTube trends.")
         return results
@@ -223,13 +222,13 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching YouTube trends: {str(e)}")
         return []
 
-# Fetch News trends
+# Fetch News trends (Limit to 5 results)
 @rate_limited(1.0)
 def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending news articles matching the query."""
     try:
         logger.info(f"Fetching news trends for query: {query}")
-        search_url = f"https://newsapi.org/v2/everything?q={query}&apiKey={NEWSAPI_KEY}"
+        search_url = f"https://newsapi.org/v2/everything?q={query}&pageSize=5&apiKey={NEWSAPI_KEY}"  # Limiting results to 5
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -239,7 +238,7 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
             title = article['title']
             content = article['content'] or article['description']
             article_url = article['url']
-            summary = process_text_with_spacy(content)  # Use the new processing function
+            summary = process_text_with_spacy(content)
 
             if title and summary and article_url:
                 results.append({
@@ -248,8 +247,6 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
                     'summary': summary,
                     'url': article_url,
                 })
-            else:
-                logger.warning(f"Skipped NewsAPI result due to missing data: {repr(article)}")
 
         logger.info(f"Fetched {len(results)} news trends.")
         return results
@@ -257,13 +254,13 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching news trends: {str(e)}")
         return []
 
-# Fetch Google Search trends
+# Fetch Google Search trends (Limit to 5 results)
 @rate_limited(1.0)
 def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch Google Custom Search results matching the query."""
     try:
         logger.info(f"Fetching Google search trends for query: {query}")
-        search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&key={GOOGLE_API_KEY}&cx={GOOGLE_CSE_ID}"
+        search_url = f"https://www.googleapis.com/customsearch/v1?q={query}&num=5&key={GOOGLE_API_KEY}&cx={GOOGLE_CSE_ID}"  # Limiting results to 5
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -273,7 +270,7 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
             title = item['title']
             snippet = item['snippet']
             link = item['link']
-            summary = process_text_with_spacy(snippet)  # Use the new processing function
+            summary = process_text_with_spacy(snippet)
 
             if title and summary and link:
                 results.append({
@@ -282,8 +279,6 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
                     'summary': summary,
                     'url': link,
                 })
-            else:
-                logger.warning(f"Skipped Google result due to missing data: {repr(item)}")
 
         logger.info(f"Fetched {len(results)} Google trends.")
         return results
@@ -291,7 +286,7 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching Google trends: {str(e)}")
         return []
 
-# Fetch Twitter trends using OAuth1.0a for authentication
+# Fetch Twitter trends (Limit to 5 results)
 @rate_limited(1.0)
 def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending tweets matching the query using OAuth1."""
@@ -310,7 +305,8 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
             'query': query,
             'tweet.fields': 'text,author_id,created_at',
             'expansions': 'author_id',
-            'user.fields': 'username'
+            'user.fields': 'username',
+            'max_results': 5  # Limiting results to 5
         }
         
         response = requests.get(search_url, params=params, auth=auth)
@@ -333,8 +329,6 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
                     'summary': summary,
                     'url': f"https://twitter.com/{username}/status/{tweet['id']}"
                 })
-            else:
-                logger.warning(f"Skipped Twitter result due to missing data: {repr(tweet)}")
 
         logger.info(f"Fetched {len(results)} Twitter trends.")
         return results
@@ -343,7 +337,7 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching Twitter trends: {str(e)}")
         return []
 
-# Fetch Reddit trends
+# Fetch Reddit trends (Limit to 5 results)
 @rate_limited(1.0)
 def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending Reddit posts matching the query."""
@@ -362,7 +356,7 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
         
         # Use token to get trends
         headers['Authorization'] = f'bearer {token}'
-        search_url = f"https://oauth.reddit.com/r/all/search?q={query}&sort=relevance&t=week"
+        search_url = f"https://oauth.reddit.com/r/all/search?q={query}&sort=relevance&t=week&limit=5"  # Limiting results to 5
         response = requests.get(search_url, headers=headers, timeout=10)
         response.raise_for_status()
         posts = response.json()['data']['children']
@@ -381,8 +375,6 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
                     'summary': summary,
                     'url': url
                 })
-            else:
-                logger.warning(f"Skipped Reddit result due to missing data: {repr(post)}")
 
         logger.info(f"Fetched {len(results)} Reddit trends.")
         return results
