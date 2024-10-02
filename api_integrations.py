@@ -1,15 +1,17 @@
 import os
 import requests
 import logging
-from requests.exceptions import RequestException
+from requests.exceptions import RequestException, Timeout
 from requests_oauthlib import OAuth1
 from cachetools import cached, TTLCache
 from dotenv import load_dotenv
 from typing import List, Dict, Any
-import re
-import json
 import time
+import praw
+import json
 from functools import wraps
+import re
+
 
 # Load environment variables
 load_dotenv()
@@ -61,7 +63,28 @@ def rate_limited(max_per_second: float):
         return wrapper
     return decorator
 
+# Retry logic decorator
+def retry(exceptions, tries=3, delay=2, backoff=2):
+    """Retry decorator for functions in case of failure."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            _tries, _delay = tries, delay
+            while _tries > 1:
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    msg = f"{func.__name__} failed due to {str(e)}, retrying in {_delay} seconds..."
+                    logger.error(msg)
+                    time.sleep(_delay)
+                    _tries -= 1
+                    _delay *= backoff
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
 # Hugging Face: Summarization
+@retry((RequestException, Timeout), tries=3)
 def summarize_with_hf(text):
     """Summarizes text using Hugging Face's BART model."""
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
@@ -69,31 +92,36 @@ def summarize_with_hf(text):
         "inputs": text,
         "parameters": {"max_length": 150, "min_length": 50, "do_sample": False}
     }
-    response = requests.post(HF_API_URL_SUMMARY, headers=headers, json=payload)
-    
-    if response.status_code != 200:
-        logger.error(f"Summarization HF API error: {response.status_code}")
+    try:
+        response = requests.post(HF_API_URL_SUMMARY, headers=headers, json=payload, timeout=10)
+        response.raise_for_status()
+    except (RequestException, Timeout) as e:
+        logger.error(f"Summarization HF API error: {str(e)}")
         return "Sorry, I couldn't summarize the text."
-
+    
     result = response.json()
-    return result[0]['summary_text']
+    return result[0].get('summary_text', "No summary available")
 
 # Hugging Face: Entity Extraction (NER)
+@retry((RequestException, Timeout), tries=3)
 def extract_entities_with_hf(text):
     """Extracts entities from text using Hugging Face's NER model."""
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     payload = {"inputs": text}
-    response = requests.post(HF_API_URL_NER, headers=headers, json=payload)
-
-    if response.status_code != 200:
-        logger.error(f"NER HF API error: {response.status_code}")
+    
+    try:
+        response = requests.post(HF_API_URL_NER, headers=headers, json=payload, timeout=10)
+        response.raise_for_status()
+    except (RequestException, Timeout) as e:
+        logger.error(f"NER HF API error: {str(e)}")
         return {"entities": []}
-
+    
     result = response.json()
     return {"entities": [ent['word'] for ent in result if ent['entity_group'] in ['ORG', 'PER', 'LOC']]}
 
 # Fetch YouTube trends (Limited to 3 results)
 @rate_limited(1.0)
+@retry((RequestException, Timeout), tries=3)
 def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending YouTube videos matching the query."""
     try:
@@ -126,6 +154,7 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
 
 # Fetch News trends (Limited to 3 results)
 @rate_limited(1.0)
+@retry((RequestException, Timeout), tries=3)
 def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending news articles matching the query."""
     try:
@@ -158,6 +187,7 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
 
 # Fetch Google Search trends (Limited to 3 results)
 @rate_limited(1.0)
+@retry((RequestException, Timeout), tries=3)
 def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch Google Custom Search results matching the query."""
     try:
@@ -188,48 +218,34 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching Google trends: {str(e)}")
         return []
 
-# Fetch Twitter trends (Limited to 3 results)
-@rate_limited(1.0)
+# Twitter API: Fetch trending tweets
+@rate_limited(1.0)  # Limiting to 1 request per second
+@retry((RequestException, Timeout), tries=3)
 def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending tweets matching the query."""
     try:
         logger.info(f"Fetching Twitter trends for query: {query}")
+        # Twitter uses OAuth1 authentication
+        auth = OAuth1(TWITTER_API_KEY, TWITTER_API_SECRET_KEY, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET)
+        search_url = f"https://api.twitter.com/1.1/search/tweets.json?q={query}&result_type=popular&count=3"
         
-        search_url = "https://api.twitter.com/2/tweets/search/recent"
-        auth = OAuth1(
-            client_key=TWITTER_API_KEY,
-            client_secret=TWITTER_API_SECRET_KEY,
-            resource_owner_key=TWITTER_ACCESS_TOKEN,
-            resource_owner_secret=TWITTER_ACCESS_TOKEN_SECRET
-        )
-
-        params = {
-            'query': query,
-            'tweet.fields': 'text,author_id,created_at',
-            'expansions': 'author_id',
-            'user.fields': 'username',
-            'max_results': 3
-        }
-        
-        response = requests.get(search_url, params=params, auth=auth)
+        response = requests.get(search_url, auth=auth, timeout=10)
         response.raise_for_status()
-
         data = response.json()
 
         results = []
-        for tweet in data.get('data', []):
+        for tweet in data['statuses']:
             tweet_text = tweet['text']
-            author_id = tweet['author_id']
-            author = next((user for user in data.get('includes', {}).get('users', []) if user['id'] == author_id), None)
-            username = author['username'] if author else "Unknown"
+            user_name = tweet['user']['screen_name']
+            tweet_url = f"https://twitter.com/{user_name}/status/{tweet['id_str']}"
             summary = summarize_with_hf(tweet_text)
 
-            if username and summary and tweet['id']:
+            if tweet_text and summary and tweet_url:
                 results.append({
                     'source': 'Twitter',
-                    'title': f"Tweet by @{username}",
+                    'title': f"Tweet by @{user_name}",
                     'summary': summary,
-                    'url': f"https://twitter.com/{username}/status/{tweet['id']}"
+                    'url': tweet_url
                 })
 
         logger.info(f"Fetched {len(results)} Twitter trends.")
@@ -237,45 +253,34 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
     except RequestException as e:
         logger.error(f"Error fetching Twitter trends: {str(e)}")
         return []
-
-# Fetch Reddit trends (Limited to 3 results)
-@rate_limited(1.0)
+        
+# Initialize Reddit API with PRAW
+reddit = praw.Reddit(
+    client_id=REDDIT_CLIENT_ID,
+    client_secret=REDDIT_SECRET,
+    user_agent=REDDIT_USER_AGENT
+)
+        
+@rate_limited(1.0)  # Limiting to 1 request per second
+@retry((RequestException, Timeout), tries=3)
 def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending Reddit posts matching the query."""
     try:
         logger.info(f"Fetching Reddit trends for query: {query}")
-        auth = requests.auth.HTTPBasicAuth(REDDIT_CLIENT_ID, REDDIT_SECRET)
-        headers = {'User-Agent': REDDIT_USER_AGENT}
-        
-        # Get token
-        response = requests.post('https://www.reddit.com/api/v1/access_token', 
-                                 auth=auth, 
-                                 data={'grant_type': 'client_credentials'},
-                                 headers=headers)
-        response.raise_for_status()
-        token = response.json()['access_token']
-        
-        # Use token to get trends
-        headers['Authorization'] = f'bearer {token}'
-        search_url = f"https://oauth.reddit.com/r/all/search?q={query}&sort=relevance&t=week&limit=3"
-
-        response = requests.get(search_url, headers=headers, timeout=10)
-        response.raise_for_status()
-        posts = response.json()['data']['children']
-
+        # Search for the query on Reddit
         results = []
-        for post in posts:
-            title = post['data']['title']
-            selftext = post['data']['selftext']
-            url = f"https://www.reddit.com{post['data']['permalink']}"
-            summary = summarize_with_hf(selftext) if selftext else title
+        for submission in reddit.subreddit("all").search(query, sort="top", limit=3):
+            post_title = submission.title
+            post_url = submission.url
+            post_content = submission.selftext[:500]  # Reddit posts can be long, truncate if necessary
+            summary = summarize_with_hf(post_content)
 
-            if title and summary and url:
+            if post_title and summary and post_url:
                 results.append({
                     'source': 'Reddit',
-                    'title': title,
+                    'title': post_title,
                     'summary': summary,
-                    'url': url
+                    'url': post_url
                 })
 
         logger.info(f"Fetched {len(results)} Reddit trends.")
@@ -283,33 +288,23 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
     except RequestException as e:
         logger.error(f"Error fetching Reddit trends: {str(e)}")
         return []
-
-# Fetch trending topics from all sources, combining results
-def fetch_trending_topics(user_input: str) -> Dict[str, Any]:
-    sanitized_input = re.sub(r"[^\w\s]", "", user_input).strip()
-    logger.info(f"Sanitized input: {sanitized_input}")
-    
-    # Combine results from different sources
-    all_results = []
-    all_results.extend(fetch_youtube_trends(sanitized_input))
-    all_results.extend(fetch_news_trends(sanitized_input))
-    all_results.extend(fetch_google_trends(sanitized_input))
-    all_results.extend(fetch_twitter_trends(sanitized_input))
-    all_results.extend(fetch_reddit_trends(sanitized_input))
-
-    # Limit total results to a maximum of 15 (3 from each API)
-    limited_results = all_results[:15]
-
-    logger.info(f"Total combined results: {len(limited_results)}")
-
-    # Generate a summary if there are results
-    general_summary = "Here are the top trends related to your query." if limited_results else "No trends found for your query."
-
-    return {
-        'general_summary': general_summary,
-        'dynamic_response': "These are the latest trends:",
-        'results': limited_results
-    }
+        
+def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
+    """Fetch all trends (YouTube, News, Google, Twitter, Reddit) for the given query."""
+    trends = []
+    try:
+        # Fetch from all platforms
+        trends.extend(fetch_youtube_trends(query))
+        trends.extend(fetch_news_trends(query))
+        trends.extend(fetch_google_trends(query))
+        trends.extend(fetch_twitter_trends(query))
+        trends.extend(fetch_reddit_trends(query))
+        
+        logger.info(f"Fetched total {len(trends)} trends from all sources.")
+        return trends
+    except Exception as e:
+        logger.error(f"Error fetching all trends: {str(e)}")
+        return []
 
 # Entry point for the script
 if __name__ == "__main__":
