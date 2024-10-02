@@ -285,22 +285,31 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
         return []
 
 # Fetch trending topics from all sources, combining results
-def fetch_trending_topics(user_input: str) -> str:
+def fetch_trending_topics(user_input: str) -> Dict[str, Any]:
     sanitized_input = re.sub(r"[^\w\s]", "", user_input).strip()
     logger.info(f"Sanitized input: {sanitized_input}")
     
-    results = []
-    results.extend(fetch_youtube_trends(sanitized_input))
-    results.extend(fetch_news_trends(sanitized_input))
-    results.extend(fetch_google_trends(sanitized_input))
-    results.extend(fetch_twitter_trends(sanitized_input))
-    results.extend(fetch_reddit_trends(sanitized_input))
+    # Combine results from different sources
+    all_results = []
+    all_results.extend(fetch_youtube_trends(sanitized_input))
+    all_results.extend(fetch_news_trends(sanitized_input))
+    all_results.extend(fetch_google_trends(sanitized_input))
+    all_results.extend(fetch_twitter_trends(sanitized_input))
+    all_results.extend(fetch_reddit_trends(sanitized_input))
 
-    # Limit total results to a combined maximum of 15 (3 from each API)
-    limited_results = results[:15]
+    # Limit total results to a maximum of 15 (3 from each API)
+    limited_results = all_results[:15]
 
     logger.info(f"Total combined results: {len(limited_results)}")
-    return json.dumps(limited_results)
+
+    # Generate a summary if there are results
+    general_summary = "Here are the top trends related to your query." if limited_results else "No trends found for your query."
+
+    return {
+        'general_summary': general_summary,
+        'dynamic_response': "These are the latest trends:",
+        'results': limited_results
+    }
 
 # Entry point for the script
 if __name__ == "__main__":

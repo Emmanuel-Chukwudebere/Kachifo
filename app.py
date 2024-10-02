@@ -308,31 +308,21 @@ def process_query():
         logger.debug(f"Sanitized query: {query}")
 
         processed_query_data = extract_entities_with_hf(query)
-
-        # Store the query and the processed Hugging Face data (safely handles missing keys)
         new_query = UserQuery(query=query)
         new_query.set_hf_data(processed_query_data)
         db.session.add(new_query)
         db.session.commit()
         logger.info("Query stored in database")
 
-        # Fetch results from APIs and format the response
-        results = json.loads(fetch_trending_topics(query))
-        
-        if 'error' in results:
-            return create_standard_response(results, 400, results['error'])
-
-        final_output = {
-            'general_summary': results['general_summary'],
-            'dynamic_response': results['dynamic_response'],
-            'results': results['results']
-        }
+        # Fetch results from APIs
+        results = fetch_trending_topics(query)
 
         logger.info("Sending response")
-        return create_standard_response(final_output, 200, "Query processed successfully")
+        return create_standard_response(results, 200, "Query processed successfully")
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
+
 
 
 if __name__ == '__main__':
