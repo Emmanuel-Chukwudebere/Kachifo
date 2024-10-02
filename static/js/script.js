@@ -29,9 +29,15 @@ const scrollToBottom = debounce(() => {
 
 // Function to format the message by converting URLs into clickable links
 function formatMessageWithLinks(message) {
+    const MAX_LENGTH = 2000; // Set a limit for message length
+
+    // Truncate the message if it exceeds the limit
+    let displayMessage = message.length > MAX_LENGTH ? message.slice(0, MAX_LENGTH) + '... [Read More]' : message;
+    
     const urlRegex = /(https?:\/\/[^\s]+)/g;
-    return message.replace(urlRegex, (url) => {
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    return displayMessage.replace(urlRegex, (url) => {
+        const encodedUrl = encodeURI(url);
+        return `<a href="${encodedUrl}" target="_blank" rel="noopener noreferrer">${encodedUrl}</a>`;
     });
 }
 
