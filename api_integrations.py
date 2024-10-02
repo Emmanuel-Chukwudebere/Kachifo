@@ -11,7 +11,14 @@ import praw
 import json
 from functools import wraps
 import re
+from nltk.tokenize import sent_tokenize
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+import nltk
 
+# Download necessary NLTK data
+nltk.download('punkt')
+nltk.download('stopwords')
 
 # Load environment variables
 load_dotenv()
@@ -47,46 +54,82 @@ last_called = 0  # Initialize as global
 def rate_limited(max_per_second: float):
     """Rate limit decorator."""
     min_interval = 1.0 / max_per_second
-    
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            global last_called  # Use global variable
+            global last_called
             elapsed = time.time() - last_called
             wait_time = min_interval - elapsed
-            
             if wait_time > 0:
                 time.sleep(wait_time)
-            last_called = time.time()  # Update the last called time
+            last_called = time.time()
             return func(*args, **kwargs)
-        
         return wrapper
     return decorator
 
-# Retry logic decorator
-def retry(exceptions, tries=3, delay=2, backoff=2):
-    """Retry decorator for functions in case of failure."""
+# Retry logic decorator with exponential backoff
+def retry_with_backoff(exceptions, tries=3, delay=1, backoff=2):
+    """Retry decorator with exponential backoff."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            _tries, _delay = tries, delay
-            while _tries > 1:
+            mtries, mdelay = tries, delay
+            while mtries > 1:
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    msg = f"{func.__name__} failed due to {str(e)}, retrying in {_delay} seconds..."
-                    logger.error(msg)
-                    time.sleep(_delay)
-                    _tries -= 1
-                    _delay *= backoff
+                    logger.warning(f"{func.__name__} failed. Retrying in {mdelay} seconds... Error: {str(e)}")
+                    time.sleep(mdelay)
+                    mtries -= 1
+                    mdelay *= backoff
             return func(*args, **kwargs)
         return wrapper
     return decorator
 
-# Hugging Face: Summarization
-@retry((RequestException, Timeout), tries=3)
+# Fallback summarization function using NLTK
+def fallback_summarize(text: str, num_sentences: int = 3) -> str:
+    sentences = sent_tokenize(text)
+    stop_words = set(stopwords.words('english'))
+    word_frequencies = {}
+    
+    for sentence in sentences:
+        for word in word_tokenize(sentence.lower()):
+            if word not in stop_words:
+                if word not in word_frequencies:
+                    word_frequencies[word] = 1
+                else:
+                    word_frequencies[word] += 1
+
+    max_frequency = max(word_frequencies.values())
+    for word in word_frequencies.keys():
+        word_frequencies[word] = (word_frequencies[word] / max_frequency)
+
+    sentence_scores = {}
+    for sentence in sentences:
+        for word in word_tokenize(sentence.lower()):
+            if word in word_frequencies:
+                if len(sentence.split(' ')) < 30:
+                    if sentence not in sentence_scores:
+                        sentence_scores[sentence] = word_frequencies[word]
+                    else:
+                        sentence_scores[sentence] += word_frequencies[word]
+
+    summary_sentences = sorted(sentence_scores, key=sentence_scores.get, reverse=True)[:num_sentences]
+    summary = ' '.join(summary_sentences)
+    return summary
+
+# Fallback NER function
+def fallback_ner(text: str) -> Dict[str, List[str]]:
+    words = word_tokenize(text)
+    named_entities = []
+    for word in words:
+        if word[0].isupper():
+            named_entities.append(word)
+    return {"entities": named_entities}
+
+@retry_with_backoff((RequestException, Timeout), tries=3)
 def summarize_with_hf(text):
-    """Summarizes text using Hugging Face's BART model."""
+    """Summarizes text using Hugging Face's BART model with fallback."""
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     payload = {
         "inputs": text,
@@ -95,29 +138,25 @@ def summarize_with_hf(text):
     try:
         response = requests.post(HF_API_URL_SUMMARY, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
+        result = response.json()
+        return result[0].get('summary_text', "No summary available")
     except (RequestException, Timeout) as e:
         logger.error(f"Summarization HF API error: {str(e)}")
-        return "Sorry, I couldn't summarize the text."
-    
-    result = response.json()
-    return result[0].get('summary_text', "No summary available")
+        return fallback_summarize(text)
 
-# Hugging Face: Entity Extraction (NER)
-@retry((RequestException, Timeout), tries=3)
+@retry_with_backoff((RequestException, Timeout), tries=3)
 def extract_entities_with_hf(text):
-    """Extracts entities from text using Hugging Face's NER model."""
+    """Extracts entities from text using Hugging Face's NER model with fallback."""
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     payload = {"inputs": text}
-    
     try:
         response = requests.post(HF_API_URL_NER, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
+        result = response.json()
+        return {"entities": [ent['word'] for ent in result if ent['entity_group'] in ['ORG', 'PER', 'LOC']]}
     except (RequestException, Timeout) as e:
         logger.error(f"NER HF API error: {str(e)}")
-        return {"entities": []}
-    
-    result = response.json()
-    return {"entities": [ent['word'] for ent in result if ent['entity_group'] in ['ORG', 'PER', 'LOC']]}
+        return fallback_ner(text)
 
 # Fetch YouTube trends (Limited to 3 results)
 @rate_limited(1.0)
@@ -299,7 +338,6 @@ def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
         trends.extend(fetch_google_trends(query))
         trends.extend(fetch_twitter_trends(query))
         trends.extend(fetch_reddit_trends(query))
-        
         logger.info(f"Fetched total {len(trends)} trends from all sources.")
         return trends
     except Exception as e:
