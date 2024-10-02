@@ -108,7 +108,7 @@ async function sendMessage(message) {
             const getFriendlySourceName = (source) => {
                 const sourceMap = {
                     'YouTube': 'a popular video',
-                    'NewsAPI': 'a recent news article',
+                    'News Article': 'a recent news article',
                     'Google': 'a web search result',
                     'Twitter': 'a trending tweet',
                     'Reddit': 'a discussion on Reddit'

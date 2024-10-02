@@ -10,16 +10,19 @@ import re
 from api_integrations import fetch_trending_topics
 from werkzeug.exceptions import HTTPException, BadRequest
 from sqlalchemy.exc import SQLAlchemyError
-import spacy
+import requests
 import json
 
-# Initialize spaCy model
-nlp = spacy.load('en_core_web_sm')
+# Hugging Face API URLs
+HF_API_URL_SUMMARY = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+HF_API_URL_NER = "https://api-inference.huggingface.co/models/dbmdz/bert-large-cased-finetuned-conll03-english"
+HF_API_URL_DIALOGPT = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
+HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 
 # Initialize Flask app
 app = Flask(__name__)
 
-# Security: Use Flask-Talisman to enforce HTTPS, set secure headers
+# Security: Use Flask-Talisman to enforce HTTPS and set secure headers
 Talisman(app, content_security_policy={
     'default-src': ["'self'", 'https:'],
     'script-src': ["'self'", 'https:'],
@@ -31,17 +34,13 @@ Talisman(app, content_security_policy={
 # Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///production.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_size': 10,
-    'pool_timeout': 30,
-    'max_overflow': 5
-}
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_size': 10, 'pool_timeout': 30, 'max_overflow': 5}
+db = SQLAlchemy(app)
 
 # Caching configuration
 app.config['CACHE_TYPE'] = 'simple'
 app.config['CACHE_DEFAULT_TIMEOUT'] = 300
 cache = Cache(app)
-db = SQLAlchemy(app)
 
 # Models
 class Trend(db.Model):
@@ -60,12 +59,12 @@ class UserQuery(db.Model):
     nouns = db.Column(db.Text, nullable=True)
     timestamp = db.Column(db.DateTime, default=db.func.now())
 
-    def set_spacy_data(self, processed_data):
+    def set_hf_data(self, processed_data):
         self.entities = json.dumps(processed_data['entities'])
         self.verbs = json.dumps(processed_data['verbs'])
         self.nouns = json.dumps(processed_data['nouns'])
 
-    def get_spacy_data(self):
+    def get_hf_data(self):
         return {
             'entities': json.loads(self.entities) if self.entities else [],
             'verbs': json.loads(self.verbs) if self.verbs else [],
@@ -100,7 +99,7 @@ def setup_logging():
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Helper function for standardized response and ensure create_standard_response always returns a tuple
+# Helper function for standardized responses
 def create_standard_response(data, status_code, message):
     response = {
         "data": data,
@@ -137,10 +136,8 @@ def rate_limit(func):
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
         logger.info(f"Remaining global requests: {remaining_requests - 1}")
 
-        # Execute the original function
         response = func(*args, **kwargs)
         
-        # Handle different response types
         if isinstance(response, tuple):
             data, status_code = response
             response = make_response(jsonify(data), status_code)
@@ -159,73 +156,48 @@ def sanitize_input(query):
     logger.info(f"Sanitized input: {sanitized}")
     return sanitized
 
-# Extract useful information from spaCy
-def process_query_with_spacy(query):
-    doc = nlp(query)
-    entities = [(ent.text, ent.label_) for ent in doc.ents]
-    nouns = [chunk.text for chunk in doc.noun_chunks]
-    verbs = [token.lemma_ for token in doc if token.pos_ == 'VERB']
-    return {
-        'entities': entities,
-        'nouns': nouns,
-        'verbs': verbs
+# Hugging Face: Summarization
+def summarize_with_hf(text):
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    payload = {
+        "inputs": text,
+        "parameters": {"max_length": 150, "min_length": 50, "do_sample": False}
     }
-
-def generate_conversational_summary_v2(summaries):
-    """
-    Generates a conversational general summary using spaCy by extracting key entities, verbs,
-    and context from the summaries.
-    """
-    if not summaries:
-        return "No meaningful summaries could be generated from the current trends."
-
-    # Combine all summaries into one large text
-    combined_text = " ".join(summaries)
+    response = requests.post(HF_API_URL_SUMMARY, headers=headers, json=payload)
     
-    # Process the combined text using spaCy
-    doc = nlp(combined_text)
+    if response.status_code != 200:
+        logger.error(f"Summarization HF API error: {response.status_code}")
+        return "Sorry, I couldn't summarize the text."
 
-    # Initialize lists for entities, verbs, and meaningful phrases
-    key_entities = []
-    key_phrases = []
-    key_verbs = []
+    result = response.json()
+    return result[0]['summary_text']
 
-    # Extract entities, verbs, and key noun chunks
-    for ent in doc.ents:
-        key_entities.append(ent.text)
-    for token in doc:
-        if token.pos_ == 'VERB':
-            key_verbs.append(token.lemma_)
-    for chunk in doc.noun_chunks:
-        key_phrases.append(chunk.text)
+# Hugging Face: Entity Extraction (NER)
+def extract_entities_with_hf(text):
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    payload = {"inputs": text}
+    response = requests.post(HF_API_URL_NER, headers=headers, json=payload)
 
-    # Build a conversational summary using the extracted information
-    summary = "The trending topics are focused on "
-    if key_entities:
-        summary += f"entities like {', '.join(set(key_entities[:5]))}. "
-    if key_phrases:
-        summary += f"Key areas of discussion include {', '.join(set(key_phrases[:5]))}. "
-    if key_verbs:
-        summary += f"The most common actions are {', '.join(set(key_verbs[:5]))}. "
+    if response.status_code != 200:
+        logger.error(f"NER HF API error: {response.status_code}")
+        return {"entities": []}
 
-    return summary if summary.strip() else "No meaningful trends were identified."
+    result = response.json()
+    return {"entities": [ent['word'] for ent in result if ent['entity_group'] in ['ORG', 'PER', 'LOC']]}
 
+# Hugging Face: Conversational Response
+def generate_response_with_hf(user_input):
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    payload = {"inputs": user_input}
 
-# Error handlers
-@app.errorhandler(HTTPException)
-def handle_http_error(e):
-    logger.error(f"HTTP error occurred: {e.description} - Code: {e.code}")
-    return create_standard_response(None, e.code, "Something went wrong! Please check your request and try again.")
+    response = requests.post(HF_API_URL_DIALOGPT, headers=headers, json=payload)
 
-@app.errorhandler(SQLAlchemyError)
-def handle_database_error(e):
-    logger.error(f"Database error: {str(e)}")
-    return create_standard_response(None, 500, "Database error occurred. Please try again later.")
+    if response.status_code != 200:
+        logger.error(f"Response generation HF API error: {response.status_code}")
+        return "Sorry, I couldn’t generate a response at the moment."
 
-@app.errorhandler(Exception)
-def handle_unexpected_error(e):
-    logger.critical(f"Unexpected error: {str(e)}", exc_info=True)
-    return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
+    result = response.json()
+    return result.get('generated_text', "Sorry, I couldn't generate a response.")
 
 # Routes
 @app.route('/')
@@ -240,10 +212,7 @@ def search_trends():
         if request.method == 'GET':
             query = request.args.get('q')
         elif request.method == 'POST':
-            if request.is_json:
-                query = request.json.get('q')
-            else:
-                query = request.form.get('q')
+            query = request.json.get('q') if request.is_json else request.form.get('q')
         else:
             raise BadRequest("Unsupported HTTP method")
 
@@ -254,42 +223,32 @@ def search_trends():
         query = sanitize_input(query)
         current_app.logger.info(f"Processing search query: {query}")
 
-        # Process the user's search query with spaCy
-        processed_query_data = process_query_with_spacy(query)
+        # Process the user's search query with Hugging Face (entity extraction)
+        processed_query_data = extract_entities_with_hf(query)
 
         # Fetch trending topics (results from external APIs)
         results = fetch_trending_topics(query)
         current_app.logger.info(f"Search results for '{query}': {len(results)} items found")
 
-        # Process the fetched results with spaCy
-        processed_results = []
+        # Summarize results using Hugging Face
+        summaries = []
         for result in results:
-            if isinstance(result, dict):
-                result_text = f"{result.get('title', '')} {result.get('summary', '')}"
-                processed_result_data = process_query_with_spacy(result_text)
-                processed_results.append({
-                    'source': result.get('source', ''),
-                    'title': result.get('title', ''),
-                    'summary': result.get('summary', ''),
-                    'url': result.get('url', ''),
-                    'entities': processed_result_data['entities'],
-                    'verbs': processed_result_data['verbs'],
-                    'nouns': processed_result_data['nouns']
-                })
-            else:
-                # Ensure non-dictionary results are serialized appropriately
-                processed_results.append({
-                    'text': str(result)  # Ensure it's serialized as a string
-                })
+            summary = summarize_with_hf(f"{result.get('title', '')} {result.get('summary', '')}")
+            summaries.append({
+                'source': result.get('source', ''),
+                'title': result.get('title', ''),
+                'summary': summary,
+                'url': result.get('url', '')
+            })
 
-        # Log processed results to debug serialization issues
-        logger.info(f"Processed search results: {processed_results}")
+        # Generate a conversational response
+        friendly_response = generate_response_with_hf(query)
 
-        # Return JSON-serializable response
         return create_standard_response({
             'query': query,
             'processed_query': processed_query_data,
-            'results': processed_results
+            'results': summaries,
+            'dynamic_response': friendly_response
         }, 200, "Search query processed successfully")
 
     except BadRequest as e:
@@ -303,15 +262,10 @@ def search_trends():
 @rate_limit
 def recent_searches():
     try:
-        # Fetch the 10 most recent queries
         recent_queries = UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
         
         recent_searches_processed = []
         for query in recent_queries:
-            # Process each recent query text with spaCy
-            processed_query_data = process_query_with_spacy(query.query)
-            
-            # Parse the stored string representations back into lists
             entities = json.loads(query.entities.replace("'", '"'))
             verbs = json.loads(query.verbs.replace("'", '"'))
             nouns = json.loads(query.nouns.replace("'", '"'))
@@ -322,11 +276,10 @@ def recent_searches():
                 'entities': entities,
                 'verbs': verbs,
                 'nouns': nouns,
-                'processed_data': processed_query_data  # Include the freshly processed data
+                'processed_data': query.get_hf_data()
             })
         
         logger.info(f"Fetched {len(recent_searches_processed)} recent searches")
-        
         return create_standard_response(recent_searches_processed, 200, "Recent searches retrieved successfully")
     
     except SQLAlchemyError as e:
@@ -336,17 +289,15 @@ def recent_searches():
     except Exception as e:
         logger.error(f"Unexpected error while fetching recent searches: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred while fetching recent searches")
-        
+
 @app.route('/process-query', methods=['POST'])
 @rate_limit
 def process_query():
     try:
-        logger.debug("Received request to /process-query")
         if request.is_json:
             query = request.json.get('q')
         else:
             query = request.form.get('q')
-        logger.info(f"Processing query: {query}")
 
         if not query:
             logger.warning("Query is missing")
@@ -355,11 +306,9 @@ def process_query():
         query = sanitize_input(query)
         logger.debug(f"Sanitized query: {query}")
 
-        processed_query_data = process_query_with_spacy(query)
-        logger.debug(f"Processed query data: {processed_query_data}")
-
+        processed_query_data = extract_entities_with_hf(query)
         new_query = UserQuery(query=query)
-        new_query.set_spacy_data(processed_query_data)
+        new_query.set_hf_data(processed_query_data)
         db.session.add(new_query)
         db.session.commit()
         logger.info("Query stored in database")
