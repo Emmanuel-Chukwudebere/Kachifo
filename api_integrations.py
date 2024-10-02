@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 # Cache setup: 1-hour time-to-live, max 1000 items
 cache = TTLCache(maxsize=1000, ttl=3600)
 
+summary_cache = TTLCache(maxsize=1000, ttl=3600)
+
 # API keys from environment variables
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -88,10 +90,12 @@ def retry_with_backoff(exceptions, tries=3, delay=1, backoff=2):
 
 # Fallback summarization function using NLTK
 def fallback_summarize(text: str, num_sentences: int = 3) -> str:
+    """Fallback summarization using basic NLTK when Hugging Face API is down."""
     sentences = sent_tokenize(text)
     stop_words = set(stopwords.words('english'))
+
+    # Calculate word frequencies
     word_frequencies = {}
-    
     for sentence in sentences:
         for word in word_tokenize(sentence.lower()):
             if word not in stop_words:
@@ -102,21 +106,22 @@ def fallback_summarize(text: str, num_sentences: int = 3) -> str:
 
     max_frequency = max(word_frequencies.values())
     for word in word_frequencies.keys():
-        word_frequencies[word] = (word_frequencies[word] / max_frequency)
+        word_frequencies[word] = word_frequencies[word] / max_frequency
 
+    # Score sentences based on word frequencies
     sentence_scores = {}
     for sentence in sentences:
         for word in word_tokenize(sentence.lower()):
             if word in word_frequencies:
-                if len(sentence.split(' ')) < 30:
+                if len(sentence.split(' ')) < 30:  # Ignore long sentences
                     if sentence not in sentence_scores:
                         sentence_scores[sentence] = word_frequencies[word]
                     else:
                         sentence_scores[sentence] += word_frequencies[word]
 
+    # Get top n sentences as summary
     summary_sentences = sorted(sentence_scores, key=sentence_scores.get, reverse=True)[:num_sentences]
-    summary = ' '.join(summary_sentences)
-    return summary
+    return ' '.join(summary_sentences)
 
 # Fallback NER function
 def fallback_ner(text: str) -> Dict[str, List[str]]:
@@ -127,9 +132,19 @@ def fallback_ner(text: str) -> Dict[str, List[str]]:
             named_entities.append(word)
     return {"entities": named_entities}
 
+# Hugging Face Summarization with Fallback
 @retry_with_backoff((RequestException, Timeout), tries=3)
-def summarize_with_hf(text):
-    """Summarizes text using Hugging Face's BART model with fallback."""
+def summarize_with_hf(text: str) -> str:
+    """Summarizes text using Hugging Face API with a fallback to NLTK summarization."""
+    # Check if summarization result is already cached
+    if text in summary_cache:
+        return summary_cache[text]
+    
+    # Limit input length to avoid API errors
+    max_input_length = 1024
+    if len(text) > max_input_length:
+        text = text[:max_input_length]
+
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     payload = {
         "inputs": text,
@@ -139,9 +154,12 @@ def summarize_with_hf(text):
         response = requests.post(HF_API_URL_SUMMARY, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
         result = response.json()
-        return result[0].get('summary_text', "No summary available")
+        summary = result[0].get('summary_text', "No summary available")
+        # Cache the result
+        summary_cache[text] = summary
+        return summary
     except (RequestException, Timeout) as e:
-        logger.error(f"Summarization HF API error: {str(e)}")
+        logger.error(f"Summarization HF API error: {str(e)}. Falling back to NLTK summarization.")
         return fallback_summarize(text)
 
 @retry_with_backoff((RequestException, Timeout), tries=3)
@@ -160,7 +178,7 @@ def extract_entities_with_hf(text):
 
 # Fetch YouTube trends (Limited to 3 results)
 @rate_limited(1.0)
-@retry((RequestException, Timeout), tries=3)
+@retry_with_backoff((RequestException, Timeout), tries=3)
 def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending YouTube videos matching the query."""
     try:
@@ -193,7 +211,7 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
 
 # Fetch News trends (Limited to 3 results)
 @rate_limited(1.0)
-@retry((RequestException, Timeout), tries=3)
+@retry_with_backoff((RequestException, Timeout), tries=3)
 def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending news articles matching the query."""
     try:
@@ -226,7 +244,7 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
 
 # Fetch Google Search trends (Limited to 3 results)
 @rate_limited(1.0)
-@retry((RequestException, Timeout), tries=3)
+@retry_with_backoff((RequestException, Timeout), tries=3)
 def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch Google Custom Search results matching the query."""
     try:
@@ -259,7 +277,7 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
 
 # Twitter API: Fetch trending tweets
 @rate_limited(1.0)  # Limiting to 1 request per second
-@retry((RequestException, Timeout), tries=3)
+@retry_with_backoff((RequestException, Timeout), tries=3)
 def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending tweets matching the query."""
     try:
@@ -301,7 +319,7 @@ reddit = praw.Reddit(
 )
         
 @rate_limited(1.0)  # Limiting to 1 request per second
-@retry((RequestException, Timeout), tries=3)
+@retry_with_backoff((RequestException, Timeout), tries=3)
 def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending Reddit posts matching the query."""
     try:
