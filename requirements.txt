@@ -44,11 +44,13 @@ itsdangerous
 Jinja2
 jiter
 MarkupSafe
+nltk
 praw
 prawcore
 proto-plus
 protobuf
 psycopg2
+psycopg2-binary
 pyasn1
 pyasn1_modules
 pycparser
@@ -60,6 +62,7 @@ python-dotenv
 pytrends
 ratelimit
 requests
+requests-oauthlib
 rsa
 sentry-sdk
 sniffio
