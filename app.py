@@ -7,17 +7,10 @@ from functools import wraps
 import logging
 from logging.handlers import RotatingFileHandler
 import re
-from api_integrations import fetch_trending_topics
+from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf
 from werkzeug.exceptions import HTTPException, BadRequest
 from sqlalchemy.exc import SQLAlchemyError
-import requests
 import json
-
-# Hugging Face API URLs
-HF_API_URL_SUMMARY = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-HF_API_URL_NER = "https://api-inference.huggingface.co/models/dbmdz/bert-large-cased-finetuned-conll03-english"
-HF_API_URL_DIALOGPT = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
-HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -55,21 +48,14 @@ class UserQuery(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     query = db.Column(db.String(255), nullable=False)
     entities = db.Column(db.Text, nullable=True)
-    verbs = db.Column(db.Text, nullable=True)
-    nouns = db.Column(db.Text, nullable=True)
     timestamp = db.Column(db.DateTime, default=db.func.now())
 
     def set_hf_data(self, processed_data):
-        # Safely access keys, providing a fallback (empty list) if they don't exist
         self.entities = json.dumps(processed_data.get('entities', []))
-        self.verbs = json.dumps(processed_data.get('verbs', []))
-        self.nouns = json.dumps(processed_data.get('nouns', []))
 
     def get_hf_data(self):
         return {
-            'entities': json.loads(self.entities) if self.entities else [],
-            'verbs': json.loads(self.verbs) if self.verbs else [],
-            'nouns': json.loads(self.nouns) if self.nouns else []
+            'entities': json.loads(self.entities) if self.entities else []
         }
 
 # Advanced logging setup
@@ -79,17 +65,14 @@ def setup_logging():
     max_log_size = 10 * 1024 * 1024  # 10 MB
     backup_count = 5
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
     file_handler = RotatingFileHandler(log_file, maxBytes=max_log_size, backupCount=backup_count)
     file_handler.setFormatter(formatter)
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
-
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
-
     for logger_name in ('werkzeug', 'sqlalchemy.engine'):
         logger = logging.getLogger(logger_name)
         logger.handlers = []
@@ -133,22 +116,17 @@ def rate_limit(func):
         elif remaining_requests <= 0:
             logger.warning("Global rate limit exceeded")
             return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
-        
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
         logger.info(f"Remaining global requests: {remaining_requests - 1}")
-
         response = func(*args, **kwargs)
-        
         if isinstance(response, tuple):
             data, status_code = response
             response = make_response(jsonify(data), status_code)
         elif not isinstance(response, Response):
             response = make_response(jsonify(response), 200)
-
         response.headers['X-RateLimit-Remaining'] = str(remaining_requests - 1)
         response.headers['X-RateLimit-Limit'] = '60'
         return response
-
     return wrapper
 
 # Input sanitization
@@ -156,49 +134,6 @@ def sanitize_input(query):
     sanitized = re.sub(r"[^\w\s]", "", query).strip()
     logger.info(f"Sanitized input: {sanitized}")
     return sanitized
-
-# Hugging Face: Summarization
-def summarize_with_hf(text):
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {
-        "inputs": text,
-        "parameters": {"max_length": 150, "min_length": 50, "do_sample": False}
-    }
-    response = requests.post(HF_API_URL_SUMMARY, headers=headers, json=payload)
-    
-    if response.status_code != 200:
-        logger.error(f"Summarization HF API error: {response.status_code}")
-        return "Sorry, I couldn't summarize the text."
-
-    result = response.json()
-    return result[0]['summary_text']
-
-# Hugging Face: Entity Extraction (NER)
-def extract_entities_with_hf(text):
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {"inputs": text}
-    response = requests.post(HF_API_URL_NER, headers=headers, json=payload)
-
-    if response.status_code != 200:
-        logger.error(f"NER HF API error: {response.status_code}")
-        return {"entities": []}
-
-    result = response.json()
-    return {"entities": [ent['word'] for ent in result if ent['entity_group'] in ['ORG', 'PER', 'LOC']]}
-
-# Hugging Face: Conversational Response
-def generate_response_with_hf(user_input):
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {"inputs": user_input}
-
-    response = requests.post(HF_API_URL_DIALOGPT, headers=headers, json=payload)
-
-    if response.status_code != 200:
-        logger.error(f"Response generation HF API error: {response.status_code}")
-        return "Sorry, I couldn’t generate a response at the moment."
-
-    result = response.json()
-    return result.get('generated_text', "Sorry, I couldn't generate a response.")
 
 # Routes
 @app.route('/')
@@ -231,7 +166,7 @@ def search_trends():
         results = fetch_trending_topics(query)
         current_app.logger.info(f"Search results for '{query}': {len(results)} items found")
 
-        # Summarize results using Hugging Face
+        # Summarize results
         summaries = []
         for result in results:
             summary = summarize_with_hf(f"{result.get('title', '')} {result.get('summary', '')}")
@@ -242,8 +177,8 @@ def search_trends():
                 'url': result.get('url', '')
             })
 
-        # Generate a conversational response
-        friendly_response = generate_response_with_hf(query)
+        # Generate a conversational response (this could be enhanced with a language model if available)
+        friendly_response = f"Here's what I found about {query}. Let me know if you want to know more about any specific topic!"
 
         return create_standard_response({
             'query': query,
@@ -251,7 +186,6 @@ def search_trends():
             'results': summaries,
             'dynamic_response': friendly_response
         }, 200, "Search query processed successfully")
-
     except BadRequest as e:
         logger.error(f"Bad request: {str(e)}")
         return create_standard_response(None, 400, str(e))
@@ -264,29 +198,18 @@ def search_trends():
 def recent_searches():
     try:
         recent_queries = UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
-        
         recent_searches_processed = []
         for query in recent_queries:
-            entities = json.loads(query.entities.replace("'", '"'))
-            verbs = json.loads(query.verbs.replace("'", '"'))
-            nouns = json.loads(query.nouns.replace("'", '"'))
-            
             recent_searches_processed.append({
                 'query': query.query,
                 'timestamp': query.timestamp.isoformat(),
-                'entities': entities,
-                'verbs': verbs,
-                'nouns': nouns,
                 'processed_data': query.get_hf_data()
             })
-        
         logger.info(f"Fetched {len(recent_searches_processed)} recent searches")
         return create_standard_response(recent_searches_processed, 200, "Recent searches retrieved successfully")
-    
     except SQLAlchemyError as e:
         logger.error(f"Database error while fetching recent searches: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "A database error occurred while fetching recent searches")
-    
     except Exception as e:
         logger.error(f"Unexpected error while fetching recent searches: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred while fetching recent searches")
@@ -316,14 +239,21 @@ def process_query():
 
         # Fetch results from APIs
         results = fetch_trending_topics(query)
-
         logger.info("Sending response")
         return create_standard_response(results, 200, "Query processed successfully")
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Pass through HTTP errors
+    if isinstance(e, HTTPException):
+        return e
 
+    # Now you're handling non-HTTP exceptions only
+    logger.error(f"An unhandled exception occurred: {str(e)}", exc_info=True)
+    return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
 if __name__ == '__main__':
     with app.app_context():
