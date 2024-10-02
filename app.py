@@ -60,9 +60,10 @@ class UserQuery(db.Model):
     timestamp = db.Column(db.DateTime, default=db.func.now())
 
     def set_hf_data(self, processed_data):
-        self.entities = json.dumps(processed_data['entities'])
-        self.verbs = json.dumps(processed_data['verbs'])
-        self.nouns = json.dumps(processed_data['nouns'])
+        # Safely access keys, providing a fallback (empty list) if they don't exist
+        self.entities = json.dumps(processed_data.get('entities', []))
+        self.verbs = json.dumps(processed_data.get('verbs', []))
+        self.nouns = json.dumps(processed_data.get('nouns', []))
 
     def get_hf_data(self):
         return {
@@ -307,12 +308,15 @@ def process_query():
         logger.debug(f"Sanitized query: {query}")
 
         processed_query_data = extract_entities_with_hf(query)
+
+        # Store the query and the processed Hugging Face data (safely handles missing keys)
         new_query = UserQuery(query=query)
         new_query.set_hf_data(processed_query_data)
         db.session.add(new_query)
         db.session.commit()
         logger.info("Query stored in database")
 
+        # Fetch results from APIs and format the response
         results = json.loads(fetch_trending_topics(query))
         
         if 'error' in results:
@@ -329,6 +333,7 @@ def process_query():
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
+
 
 if __name__ == '__main__':
     with app.app_context():
