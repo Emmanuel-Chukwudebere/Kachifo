@@ -1,13 +1,14 @@
-// JavaScript for chat interaction
+// JavaScript for chat interaction and handling API responses with all necessary improvements
+
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 const chatWindow = document.querySelector('.chat-window');
 const initialView = document.querySelector('.initial-view');
 const suggestions = document.querySelector('.suggestions');
 const newChatIcon = document.querySelector('.new-chat-icon');
-
 const loadingGifPath = 'static/icons/typing-gif.gif';
 const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg';
+const loadingSpinner = document.getElementById('loading-spinner');
 
 // Debounce function to limit the rate of function calls
 function debounce(func, wait) {
@@ -33,7 +34,7 @@ function formatMessageWithLinks(message) {
 
     // Truncate the message if it exceeds the limit
     let displayMessage = message.length > MAX_LENGTH ? message.slice(0, MAX_LENGTH) + '... [Read More]' : message;
-    
+
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     return displayMessage.replace(urlRegex, (url) => {
         const encodedUrl = encodeURI(url);
@@ -89,6 +90,9 @@ async function sendMessage(message) {
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
 
+    // Show loading spinner while processing
+    loadingSpinner.style.display = 'block';
+
     const typingBubble = createChatBubble('', 'kachifo', true);
 
     try {
@@ -139,6 +143,8 @@ async function sendMessage(message) {
         console.error('Error:', error);
         typingBubble.remove();
         createChatBubble("I'm sorry, but something went wrong on my end. Could we try that again?", 'kachifo');
+    } finally {
+        loadingSpinner.style.display = 'none'; // Hide loading spinner when processing is complete
     }
 }
 
@@ -170,7 +176,7 @@ userInput.addEventListener('keypress', (e) => {
 });
 
 // Auto-resize input field and handle typing state
-userInput.addEventListener('input', debounce(function() {
+userInput.addEventListener('input', debounce(function () {
     this.style.height = 'auto';
     this.style.height = (this.scrollHeight) + 'px';
     if (this.value.trim() !== '') {
