@@ -170,6 +170,10 @@ document.querySelectorAll('.suggestion').forEach(suggestion => {
 // Event listener for the New Chat icon
 newChatIcon.addEventListener('click', resetChat);
 
+// Attach event listeners and initialize chat
+sendBtn.addEventListener('click', sendMessage);
+newChatIcon.addEventListener('click', resetChat);
+
 // Initial scroll to bottom on page load
 scrollToBottom();
 
