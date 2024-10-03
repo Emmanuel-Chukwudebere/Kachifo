@@ -65,7 +65,7 @@ def setup_logging():
     backup_count = 5
 
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_log_size, backupCount=backup_count)
+    file_handler = RotatingFileHandler(log_file, maxBytes=max_log_size, backupCount=backup_count)
     file_handler.setFormatter(formatter)
 
     console_handler = logging.StreamHandler()
@@ -141,6 +141,11 @@ def sanitize_input(query):
     logger.info(f"Sanitized input: {sanitized}")
     return sanitized
 
+# Generate General Summary from Individual Summaries
+def generate_general_summary(individual_summaries):
+    combined_text = " ".join(individual_summaries)
+    return summarize_with_hf(combined_text)
+
 # Routes
 @app.route('/')
 def home():
@@ -170,26 +175,21 @@ def search_trends():
 
         # Fetch trending topics (results from external APIs)
         results = fetch_trending_topics(query)
-
         current_app.logger.info(f"Search results for '{query}': {len(results)} items found")
 
-        # Summarize results
-        summaries = []
-        for result in results:
-            summary = summarize_with_hf(f"{result.get('title', '')} {result.get('summary', '')}")
-            summaries.append({
-                'source': result.get('source', ''),
-                'title': result.get('title', ''),
-                'summary': summary,
-                'url': result.get('url', '')
-            })
+        # Summarize individual results
+        individual_summaries = [summarize_with_hf(result['summary']) for result in results if result.get('summary')]
+
+        # Generate general summary from individual summaries
+        general_summary = generate_general_summary(individual_summaries)
 
         # Generate a conversational response
         friendly_response = f"Here's what I found about {query}. Let me know if you want to know more about any specific topic!"
         return create_standard_response({
             'query': query,
             'processed_query': processed_query_data,
-            'results': summaries,
+            'results': results,
+            'general_summary': general_summary,
             'dynamic_response': friendly_response
         }, 200, "Search query processed successfully")
 
@@ -217,7 +217,7 @@ def recent_searches():
         logger.info(f"Fetched {len(recent_searches_processed)} recent searches")
         return create_standard_response(recent_searches_processed, 200, "Recent searches retrieved successfully")
 
-    except SQLAlchemyError as e:
+        except SQLAlchemyError as e:
         logger.error(f"Database error while fetching recent searches: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "A database error occurred while fetching recent searches")
     except Exception as e:
@@ -253,9 +253,30 @@ def process_query():
 
         # Fetch results from external APIs (YouTube, Google, News, etc.)
         results = fetch_trending_topics(query)
-        logger.info("Sending response with the search results")
 
-        return create_standard_response(results, 200, "Query processed successfully")
+        # Summarize individual results
+        individual_summaries = []
+        for result in results:
+            if result.get('summary'):
+                summary = summarize_with_hf(result['summary'])
+                individual_summaries.append(summary)
+        
+        # Generate a general summary from individual summaries
+        general_summary = generate_general_summary(individual_summaries)
+
+        # Generate a conversational response
+        conversational_response = f"I've found some interesting insights on {query}. Here’s a quick overview: {general_summary}. Let me know if you want more details on any specific topic!"
+
+        logger.info("Sending response with the processed query results")
+
+        return create_standard_response({
+            'query': query,
+            'processed_query': processed_query_data,
+            'results': results,
+            'individual_summaries': individual_summaries,
+            'general_summary': general_summary,
+            'dynamic_response': conversational_response
+        }, 200, "Query processed successfully")
 
     except SQLAlchemyError as e:
         logger.error(f"Database error: {str(e)}", exc_info=True)
@@ -263,7 +284,8 @@ def process_query():
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
-
+        
+        
 @app.errorhandler(Exception)
 def handle_exception(e):
     # Handle HTTP errors
