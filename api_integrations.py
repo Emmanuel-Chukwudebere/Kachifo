@@ -2,23 +2,11 @@ import os
 import requests
 import logging
 from requests.exceptions import RequestException, Timeout
-from requests_oauthlib import OAuth1
-from cachetools import cached, TTLCache
+from cachetools import TTLCache
+from functools import wraps
 from dotenv import load_dotenv
 from typing import List, Dict, Any
-import time
-import praw
-import json
-from functools import wraps
-import re
-from nltk.tokenize import sent_tokenize
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-import nltk
-
-# Download necessary NLTK data
-nltk.download('punkt')
-nltk.download('stopwords')
+from huggingface_hub import InferenceApi
 
 # Load environment variables
 load_dotenv()
@@ -27,49 +15,20 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Cache setup: 1-hour time-to-live, max 1000 items
-cache = TTLCache(maxsize=1000, ttl=3600)
-
-summary_cache = TTLCache(maxsize=1000, ttl=3600)
-
-# API keys from environment variables
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
-NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
-TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
-TWITTER_API_SECRET_KEY = os.getenv("TWITTER_API_SECRET_KEY")
-TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-TWITTER_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-REDDIT_SECRET = os.getenv("REDDIT_SECRET")
-REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
-
-# Hugging Face API URLs and Key
-HF_API_URL_SUMMARY = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
-HF_API_URL_NER = "https://api-inference.huggingface.co/models/dbmdz/bert-large-cased-finetuned-conll03-english"
+# API keys and URLs
 HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
+HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"  # Summarization model
+HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"  # NER model
 
-# Rate limit configuration
-last_called = 0  # Initialize as global
+# Initialize the Hugging Face Hub Inference API
+inference_summary = InferenceApi(repo_id=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
+inference_ner = InferenceApi(repo_id=HF_API_NER_MODEL, token=HF_API_KEY)
 
-def rate_limited(max_per_second: float):
-    """Rate limit decorator."""
-    min_interval = 1.0 / max_per_second
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            global last_called
-            elapsed = time.time() - last_called
-            wait_time = min_interval - elapsed
-            if wait_time > 0:
-                time.sleep(wait_time)
-            last_called = time.time()
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
+# Cache setup: 1-hour time-to-live, max 1000 items
+summary_cache = TTLCache(maxsize=1000, ttl=3600)
+entity_cache = TTLCache(maxsize=1000, ttl=3600)
 
-# Retry logic decorator with exponential backoff
+# Retry logic with exponential backoff
 def retry_with_backoff(exceptions, tries=3, delay=1, backoff=2):
     """Retry decorator with exponential backoff."""
     def decorator(func):
@@ -88,93 +47,64 @@ def retry_with_backoff(exceptions, tries=3, delay=1, backoff=2):
         return wrapper
     return decorator
 
-# Fallback summarization function using NLTK
-def fallback_summarize(text: str, num_sentences: int = 3) -> str:
-    """Fallback summarization using basic NLTK when Hugging Face API is down."""
-    sentences = sent_tokenize(text)
-    stop_words = set(stopwords.words('english'))
-
-    # Calculate word frequencies
-    word_frequencies = {}
-    for sentence in sentences:
-        for word in word_tokenize(sentence.lower()):
-            if word not in stop_words:
-                if word not in word_frequencies:
-                    word_frequencies[word] = 1
-                else:
-                    word_frequencies[word] += 1
-
-    max_frequency = max(word_frequencies.values())
-    for word in word_frequencies.keys():
-        word_frequencies[word] = word_frequencies[word] / max_frequency
-
-    # Score sentences based on word frequencies
-    sentence_scores = {}
-    for sentence in sentences:
-        for word in word_tokenize(sentence.lower()):
-            if word in word_frequencies:
-                if len(sentence.split(' ')) < 30:  # Ignore long sentences
-                    if sentence not in sentence_scores:
-                        sentence_scores[sentence] = word_frequencies[word]
-                    else:
-                        sentence_scores[sentence] += word_frequencies[word]
-
-    # Get top n sentences as summary
-    summary_sentences = sorted(sentence_scores, key=sentence_scores.get, reverse=True)[:num_sentences]
-    return ' '.join(summary_sentences)
-
-# Fallback NER function
-def fallback_ner(text: str) -> Dict[str, List[str]]:
-    words = word_tokenize(text)
-    named_entities = []
-    for word in words:
-        if word[0].isupper():
-            named_entities.append(word)
-    return {"entities": named_entities}
-
-# Hugging Face Summarization with Fallback
+# Hugging Face Summarization API with caching
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def summarize_with_hf(text: str) -> str:
-    """Summarizes text using Hugging Face API with a fallback to NLTK summarization."""
+    """Summarizes text using Hugging Face Hub API."""
     # Check if summarization result is already cached
     if text in summary_cache:
         return summary_cache[text]
     
-    # Limit input length to avoid API errors
-    max_input_length = 1024
-    if len(text) > max_input_length:
-        text = text[:max_input_length]
-
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {
-        "inputs": text,
-        "parameters": {"max_length": 150, "min_length": 50, "do_sample": False}
-    }
     try:
-        response = requests.post(HF_API_URL_SUMMARY, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
-        result = response.json()
-        summary = result[0].get('summary_text', "No summary available")
+        logger.info("Calling Hugging Face Summarization API")
+        response = inference_summary(inputs=text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
+        summary = response.get('summary_text', "No summary available")
+        
         # Cache the result
         summary_cache[text] = summary
         return summary
     except (RequestException, Timeout) as e:
-        logger.error(f"Summarization HF API error: {str(e)}. Falling back to NLTK summarization.")
-        return fallback_summarize(text)
+        logger.error(f"Error calling Hugging Face Summarization API: {str(e)}")
+        return "Sorry, summarization is unavailable at the moment."
 
+# Hugging Face NER API with caching
 @retry_with_backoff((RequestException, Timeout), tries=3)
-def extract_entities_with_hf(text):
-    """Extracts entities from text using Hugging Face's NER model with fallback."""
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {"inputs": text}
+def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
+    """Extracts named entities using Hugging Face Hub API."""
+    # Check if NER result is already cached
+    if text in entity_cache:
+        return entity_cache[text]
+
     try:
-        response = requests.post(HF_API_URL_NER, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
-        result = response.json()
-        return {"entities": [ent['word'] for ent in result if ent['entity_group'] in ['ORG', 'PER', 'LOC']]}
+        logger.info("Calling Hugging Face NER API")
+        response = inference_ner(inputs=text)
+        entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
+        
+        # Cache the result
+        entity_cache[text] = {"entities": entities}
+        return {"entities": entities}
     except (RequestException, Timeout) as e:
-        logger.error(f"NER HF API error: {str(e)}")
-        return fallback_ner(text)
+        logger.error(f"Error calling Hugging Face NER API: {str(e)}")
+        return {"entities": []}
+
+# Fetch trending topics (combined from multiple sources)
+@retry_with_backoff((RequestException, Timeout), tries=3)
+def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
+    """Fetch all trends (YouTube, News, Google, Twitter, Reddit) for the given query."""
+    trends = []
+    try:
+        # Call multiple external APIs to fetch trends (e.g., YouTube, Google, Twitter)
+        trends.extend(fetch_youtube_trends(query))
+        trends.extend(fetch_news_trends(query))
+        trends.extend(fetch_google_trends(query))
+        trends.extend(fetch_twitter_trends(query))
+        trends.extend(fetch_reddit_trends(query))
+
+        logger.info(f"Fetched total {len(trends)} trends from all sources.")
+        return trends
+    except Exception as e:
+        logger.error(f"Error fetching trends: {str(e)}")
+        return []
 
 # Fetch YouTube trends (Limited to 3 results)
 @rate_limited(1.0)
@@ -346,21 +276,6 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching Reddit trends: {str(e)}")
         return []
         
-def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
-    """Fetch all trends (YouTube, News, Google, Twitter, Reddit) for the given query."""
-    trends = []
-    try:
-        # Fetch from all platforms
-        trends.extend(fetch_youtube_trends(query))
-        trends.extend(fetch_news_trends(query))
-        trends.extend(fetch_google_trends(query))
-        trends.extend(fetch_twitter_trends(query))
-        trends.extend(fetch_reddit_trends(query))
-        logger.info(f"Fetched total {len(trends)} trends from all sources.")
-        return trends
-    except Exception as e:
-        logger.error(f"Error fetching all trends: {str(e)}")
-        return []
 
 # Entry point for the script
 if __name__ == "__main__":
