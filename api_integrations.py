@@ -3,10 +3,16 @@ import requests
 import logging
 from requests.exceptions import RequestException, Timeout
 from cachetools import TTLCache
+import time
 from functools import wraps
 from dotenv import load_dotenv
 from typing import List, Dict, Any
-from huggingface_hub import InferenceApi
+from huggingface_hub import InferenceClient
+import praw
+import json
+from functools import wraps
+import re
+from requests_oauthlib import OAuth1
 
 # Load environment variables
 load_dotenv()
@@ -15,18 +21,53 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Cache setup: 1-hour time-to-live, max 1000 items
+cache = TTLCache(maxsize=1000, ttl=3600)
+
+# API keys from environment variables
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
+TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
+TWITTER_API_SECRET_KEY = os.getenv("TWITTER_API_SECRET_KEY")
+TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+TWITTER_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
+REDDIT_SECRET = os.getenv("REDDIT_SECRET")
+REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
+
 # API keys and URLs
 HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"  # Summarization model
 HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"  # NER model
 
 # Initialize the Hugging Face Hub Inference API
-inference_summary = InferenceApi(repo_id=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
-inference_ner = InferenceApi(repo_id=HF_API_NER_MODEL, token=HF_API_KEY)
+inference_summary = InferenceClient(repo_id=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
+inference_ner = InferenceClient(repo_id=HF_API_NER_MODEL, token=HF_API_KEY)
 
 # Cache setup: 1-hour time-to-live, max 1000 items
 summary_cache = TTLCache(maxsize=1000, ttl=3600)
 entity_cache = TTLCache(maxsize=1000, ttl=3600)
+
+# Rate limit configuration
+last_called = 0  # Initialize as global
+
+def rate_limited(max_per_second: float):
+    """Rate limit decorator."""
+    min_interval = 1.0 / max_per_second
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            global last_called
+            elapsed = time.time() - last_called
+            wait_time = min_interval - elapsed
+            if wait_time > 0:
+                time.sleep(wait_time)
+            last_called = time.time()
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # Retry logic with exponential backoff
 def retry_with_backoff(exceptions, tries=3, delay=1, backoff=2):
