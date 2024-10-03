@@ -1,15 +1,15 @@
-// JavaScript for chat interaction and handling API responses with all necessary improvements
+// JavaScript for chat interaction and handling API responses
 
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 const chatWindow = document.querySelector('.chat-window');
-const initialView = document.querySelector('.initial-view');
-const suggestions = document.querySelector('.suggestions');
+const initialView = document.querySelector('.initial-view'); // The initial view that should be hidden
+const suggestions = document.querySelector('.suggestions'); // Suggestion box
 const newChatIcon = document.querySelector('.new-chat-icon');
 const loadingSpinner = document.getElementById('loading-spinner'); // Loading spinner element
 
 const loadingGifPath = 'static/icons/typing-gif.gif'; // Path to loading GIF
-const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg'; // Ensure this path is correct
+const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg'; // Path to Kachifo logo
 
 // Debounce function to limit the rate of function calls
 function debounce(func, wait) {
@@ -76,46 +76,54 @@ function createChatBubble(message, sender, isTyping = false) {
 
     bubble.appendChild(messageContent);
     chatWindow.appendChild(bubble);
-    scrollToBottom();
+    scrollToBottom(); // Automatically scroll to the latest message
 }
 
 // Function to handle sending a message
 async function sendMessage() {
     const message = userInput.value.trim();
-    if (message === '') return;
+    if (message === '') {
+        console.log('Message input is empty');
+        return;
+    }
+
+    // When a message is sent, hide the initial view and reveal the chat window
+    initialView.classList.add('hidden');  // Hide initial view
+    suggestions.classList.add('hidden');  // Hide suggestions
+    chatWindow.classList.add('active');   // Reveal the chat window
 
     console.log('Search initiated:', message); // Log the user's query
     createChatBubble(message, 'user');
-    userInput.value = '';
+    userInput.value = ''; // Clear input after sending
     loadingSpinner.style.display = 'block'; // Show loading spinner
 
-    const typingBubble = createChatBubble('', 'kachifo', true);
+    const typingBubble = createChatBubble('', 'kachifo', true); // Kachifo typing indicator
     try {
+        console.log('Sending fetch request to /process-query...');
         const response = await fetch('/process-query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ q: message }),
         });
 
-        console.log('Response status:', response.status); // Log the response status
+        console.log('Fetch request complete. Response status:', response.status);
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`);
         }
 
         const data = await response.json();
-        typingBubble.remove();
+        typingBubble.remove(); // Remove typing bubble when response is received
 
         // Process response
         if (data.data) {
             createChatBubble(data.data.dynamic_response, 'kachifo');
-            // Handle additional processing of results and summaries...
         } else if (data.error) {
             createChatBubble(data.error, 'kachifo');
         } else {
             createChatBubble("Unexpected response format.", 'kachifo');
         }
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Error during fetch:', error);
         typingBubble.remove();
         createChatBubble("I'm sorry, something went wrong on my end.", 'kachifo');
     } finally {
@@ -125,11 +133,11 @@ async function sendMessage() {
 
 // Function to reset the chat
 function resetChat() {
-    chatWindow.innerHTML = '';
-    initialView.classList.remove('hidden');
-    suggestions.classList.remove('hidden');
-    chatWindow.classList.remove('active');
-    scrollToBottom();
+    chatWindow.innerHTML = '';  // Clear chat window
+    initialView.classList.remove('hidden'); // Show initial view again
+    suggestions.classList.remove('hidden'); // Show suggestions again
+    chatWindow.classList.remove('active');  // Hide chat window until next message
+    scrollToBottom();  // Scroll to bottom if necessary
 }
 
 // Function to check if the user is on a desktop
@@ -150,11 +158,11 @@ userInput.addEventListener('keypress', (e) => {
 
 // Auto-resize input field and handle typing state
 userInput.addEventListener('input', debounce(function () {
-    this.style.height = 'auto';
-    this.style.height = (this.scrollHeight) + 'px';
+    this.style.height = 'auto'; // Reset height first
+    this.style.height = (this.scrollHeight) + 'px'; // Adjust height based on content
     if (this.value.trim() !== '') {
-        initialView.classList.add('typing');
-        suggestions.classList.add('typing');
+        initialView.classList.add('typing'); // Indicate user is typing
+        suggestions.classList.add('typing'); // Hide suggestions while typing
     } else {
         initialView.classList.remove('typing');
         suggestions.classList.remove('typing');
