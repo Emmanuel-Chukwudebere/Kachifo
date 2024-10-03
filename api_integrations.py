@@ -43,8 +43,8 @@ HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"  # Summarization model
 HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"  # NER model
 
 # Initialize the Hugging Face Hub Inference API
-inference_summary = InferenceClient(repo_id=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
-inference_ner = InferenceClient(repo_id=HF_API_NER_MODEL, token=HF_API_KEY)
+inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
+inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
 
 # Cache setup: 1-hour time-to-live, max 1000 items
 summary_cache = TTLCache(maxsize=1000, ttl=3600)
