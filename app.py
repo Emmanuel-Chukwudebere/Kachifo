@@ -84,6 +84,7 @@ def setup_logging():
         logger.setLevel(log_level)
 
 setup_logging()
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Helper function for standardized responses
@@ -227,50 +228,29 @@ def recent_searches():
 @app.route('/process-query', methods=['POST'])
 @rate_limit
 def process_query():
+    logger.debug("Received a request at /process-query")
+    
     try:
-        if request.is_json:
-            query = request.json.get('q')
-        else:
-            query = request.form.get('q')
-
+        query = request.json.get('q') if request.is_json else None
         if not query:
-            logger.warning("Query is missing")
-            return create_standard_response({'error': 'Query is required'}, 400, "Query is required")
+            logger.warning("Query is missing from the request.")
+            return create_standard_response({'error': 'Query parameter is required'}, 400, "Query is missing")
 
         query = sanitize_input(query)
-        logger.debug(f"Sanitized query: {query}")
-        
+        logger.info(f"Processing search query: {query}")
+
+        # Log request details
         logger.debug(f"Request headers: {request.headers}")
         logger.debug(f"Request data: {request.json}")
 
-        # Extract entities from query using Hugging Face API
         processed_query_data = extract_entities_with_hf(query)
-
-        # Store the query in the database
-        new_query = UserQuery(query=query)
-        new_query.set_hf_data(processed_query_data)
-        db.session.add(new_query)
-        db.session.commit()
-
-        logger.info("Query stored in the database")
-
-        # Fetch results from external APIs (YouTube, Google, News, etc.)
         results = fetch_trending_topics(query)
 
-        # Summarize individual results
-        individual_summaries = []
-        for result in results:
-            if result.get('summary'):
-                summary = summarize_with_hf(result['summary'])
-                individual_summaries.append(summary)
-        
-        # Generate a general summary from individual summaries
+        individual_summaries = [summarize_with_hf(result['summary']) for result in results if result.get('summary')]
         general_summary = generate_general_summary(individual_summaries)
 
-        # Generate a conversational response
-        conversational_response = f"I've found some interesting insights on {query}. Here’s a quick overview: {general_summary}. Let me know if you want more details on any specific topic!"
-
-        logger.info("Sending response with the processed query results")
+        dynamic_response = f"Here's a summary of trends about {query}. Let me know if you want more details!"
+        logger.info(f"General summary generated: {general_summary[:100]}...")
 
         return create_standard_response({
             'query': query,
@@ -278,15 +258,12 @@ def process_query():
             'results': results,
             'individual_summaries': individual_summaries,
             'general_summary': general_summary,
-            'dynamic_response': conversational_response
+            'dynamic_response': dynamic_response
         }, 200, "Query processed successfully")
-
-    except SQLAlchemyError as e:
-        logger.error(f"Database error: {str(e)}", exc_info=True)
-        return create_standard_response(None, 500, "A database error occurred. Please try again later.")
+        
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
-        return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
+        return create_standard_response(None, 500, "An unexpected error occurred while processing the request.")
         
         
 @app.errorhandler(Exception)
