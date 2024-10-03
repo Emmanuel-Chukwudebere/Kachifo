@@ -89,20 +89,22 @@ def retry_with_backoff(exceptions, tries=3, delay=2, backoff=2):
         return wrapper
     return decorator
 
-@rate_limited(max_per_second=1.0)  # Customize this based on API rate limits
+@rate_limited(max_per_second=1.0)  # Customize based on API rate limits
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def summarize_with_hf(text: str) -> str:
-    """Summarizes text using Hugging Face Hub API with caching."""
+    """Summarizes text using Hugging Face Hub API with caching and logging."""
     # Check if summarization result is already cached
     if text in summary_cache:
-        logger.info("Cache hit for summarization")
+        logger.info(f"Cache hit for summarization: {text[:100]}...")  # Log part of the input for clarity
         return summary_cache[text]
 
     try:
-        logger.info("Calling Hugging Face Summarization API")
-        # Make the summarization call
+        logger.info(f"Calling Hugging Face Summarization API for text: {text[:100]}...")  # Log partial input text
         response = inference_summary.summarization(text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
         summary = response.get('summary_text', "No summary available")
+
+        # Log the result of the summarization
+        logger.info(f"Summary generated: {summary[:100]}...")  # Log part of the output for clarity
 
         # Cache the result
         summary_cache[text] = summary
@@ -111,19 +113,21 @@ def summarize_with_hf(text: str) -> str:
         logger.error(f"Error calling Hugging Face Summarization API: {str(e)}")
         return "Sorry, summarization is unavailable at the moment."
 
-@rate_limited(max_per_second=1.0)  # Customize this based on API rate limits
+@rate_limited(max_per_second=1.0)  # Customize based on API rate limits
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
-    """Extracts named entities using Hugging Face Hub API with caching."""
+    """Extracts named entities using Hugging Face Hub API with caching and logging."""
     if text in entity_cache:
-        logger.info("Cache hit for NER")
+        logger.info(f"Cache hit for NER: {text[:100]}...")  # Log part of the input for clarity
         return entity_cache[text]
 
     try:
-        logger.info("Calling Hugging Face NER API")
-        # Make the NER call
+        logger.info(f"Calling Hugging Face NER API for text: {text[:100]}...")  # Log partial input text
         response = inference_ner.token_classification(text)
         entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
+
+        # Log the result of the NER call
+        logger.info(f"Entities extracted: {entities}")  # Log the extracted entities
 
         # Cache the result
         entity_cache[text] = {"entities": entities}
@@ -150,6 +154,20 @@ def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error fetching trends: {str(e)}")
         return []
+        
+# General summary from individual summaries
+def generate_general_summary(individual_summaries: List[str]) -> str:
+    """Generates a general summary using Hugging Face Hub API from individual summaries."""
+    combined_text = " ".join(individual_summaries)  # Combine all individual summaries into one text
+
+    try:
+        logger.info("Calling Hugging Face Summarization API for general summary")
+        response = inference_summary.summarization(combined_text, parameters={"max_length": 200, "min_length": 100, "do_sample": False})
+        general_summary = response.get('summary_text', "No summary available")
+        return general_summary
+    except Exception as e:
+        logger.error(f"Error generating general summary: {str(e)}")
+        return "Sorry, I couldn't generate a summary at the moment."
 
 # Fetch YouTube trends (Limited to 3 results)
 @rate_limited(1.0)
