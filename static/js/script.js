@@ -27,17 +27,14 @@ const scrollToBottom = debounce(() => {
     chatWindow.scrollTop = chatWindow.scrollHeight;
 }, 100);
 
-// Function to format the message by converting URLs into clickable links
+// Function to format the message by converting URLs into clickable 'Read more' links
 function formatMessageWithLinks(message) {
-    const MAX_LENGTH = 2000; // Set a limit for message length
-
-    // Truncate the message if it exceeds the limit
-    let displayMessage = message.length > MAX_LENGTH ? message.slice(0, MAX_LENGTH) + '... [Read More]' : message;
-    
     const urlRegex = /(https?:\/\/[^\s]+)/g;
-    return displayMessage.replace(urlRegex, (url) => {
+    
+    // Replace URLs with 'Read more' links
+    return message.replace(urlRegex, (url) => {
         const encodedUrl = encodeURI(url);
-        return `<a href="${encodedUrl}" target="_blank" rel="noopener noreferrer">${encodedUrl}</a>`;
+        return `<a href="${encodedUrl}" target="_blank" rel="noopener noreferrer">Read more</a>`;
     });
 }
 
@@ -114,7 +111,7 @@ async function sendMessage(message) {
 
             const getFriendlySourceName = (source) => {
                 const sourceMap = {
-                    'YouTube': 'a popular video',
+                    'YouTube': 'a video',
                     'News Article': 'a recent news article',
                     'Google': 'a web search result',
                     'Twitter': 'a trending tweet',
@@ -124,7 +121,7 @@ async function sendMessage(message) {
             };
 
             data.data.results.forEach(item => {
-                combinedResponse += `\n\nI found ${getFriendlySourceName(item.source)} that might interest you: <strong>${item.title}</strong>. ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more here</a>.`;
+                combinedResponse += `\n\nI came across ${getFriendlySourceName(item.source)} I think you might find interesting! Here it is: <strong>${item.title}</strong>. ${item.summary} <a href="{ item.url }" target="_blank" rel="noopener noreferrer">Read more</a>`;
             });
 
             combinedResponse += "\n\nIs there any specific aspect of these trends you'd like to explore further? Or perhaps you have another topic in mind?";
