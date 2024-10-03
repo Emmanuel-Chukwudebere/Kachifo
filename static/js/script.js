@@ -48,9 +48,10 @@ function createChatBubble(message, sender, isTyping = false) {
     bubble.classList.add(sender === 'kachifo' ? 'kachifo-message' : 'user-message');
     bubble.setAttribute('aria-live', 'polite');
 
-    if (sender === 'kachifo') {
+    // Add Kachifo logo only for Kachifo messages
+    if (sender === 'kachifo' && !isTyping) {
         const kachifoLogo = document.createElement('img');
-        kachifoLogo.src = kachifoLogoPath;
+        kachifoLogo.src = kachifoLogoPath; // Ensure the logo path is correct
         kachifoLogo.alt = 'Kachifo Logo';
         kachifoLogo.classList.add('kachifo-logo-small');
         bubble.appendChild(kachifoLogo);
@@ -82,7 +83,7 @@ async function sendMessage(message) {
     }
     if (message === '') return;
 
-    console.log('Search initiated', { query: message, timestamp: new Date().toISOString() });
+    console.log('Sending query:', { query: message });
     createChatBubble(message, 'user');
     userInput.value = '';
     userInput.style.height = 'auto';
@@ -90,19 +91,15 @@ async function sendMessage(message) {
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
 
-    // Show loading spinner while processing
+    // Show loading spinner and typing indicator
     loadingSpinner.style.display = 'block';
-
     const typingBubble = createChatBubble('', 'kachifo', true);
 
     try {
         const response = await fetch('/process-query', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ q: message }),
-            timeout: 30000 // 30 seconds timeout
         });
 
         if (!response.ok) {
@@ -112,39 +109,28 @@ async function sendMessage(message) {
         const data = await response.json();
         typingBubble.remove();
 
+        // Display the results returned by the API
         if (data.data && data.data.general_summary && data.data.dynamic_response && data.data.results) {
             let combinedResponse = `${data.data.general_summary} ${data.data.dynamic_response}`;
 
-            const getFriendlySourceName = (source) => {
-                const sourceMap = {
-                    'YouTube': 'a popular video',
-                    'News Article': 'a recent news article',
-                    'Google': 'a web search result',
-                    'Twitter': 'a trending tweet',
-                    'Reddit': 'a discussion on Reddit'
-                };
-                return sourceMap[source] || 'an interesting source';
-            };
-
+            // Iterate over results and append to the response
             data.data.results.forEach(item => {
-                combinedResponse += `\n\nI found ${getFriendlySourceName(item.source)} that might interest you: <strong>${item.title}</strong>. ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more here</a>.`;
+                combinedResponse += `<br><br>I found a result: <strong>${item.title}</strong>. ${item.summary} <a href="${item.url}" target="_blank">Read more</a>`;
             });
-
-            combinedResponse += "\n\nIs there any specific aspect of these trends you'd like to explore further? Or perhaps you have another topic in mind?";
 
             createChatBubble(combinedResponse, 'kachifo');
         } else if (data.error) {
-            createChatBubble(`I'm sorry, but I encountered an issue while searching: ${data.error}. Could you try rephrasing your query or asking about something else?`, 'kachifo');
+            createChatBubble(`I'm sorry, but there was an error: ${data.error}`, 'kachifo');
         } else {
-            createChatBubble("I apologize, but I'm having trouble processing that request right now. Could you try asking something else?", 'kachifo');
-            console.error('Unexpected response format:', data);
+            createChatBubble("Something went wrong. Please try again.", 'kachifo');
         }
+
     } catch (error) {
         console.error('Error:', error);
         typingBubble.remove();
-        createChatBubble("I'm sorry, but something went wrong on my end. Could we try that again?", 'kachifo');
+        createChatBubble("Sorry, something went wrong. Let's try that again!", 'kachifo');
     } finally {
-        loadingSpinner.style.display = 'none'; // Hide loading spinner when processing is complete
+        loadingSpinner.style.display = 'none'; // Hide loading spinner when processing is done
     }
 }
 
