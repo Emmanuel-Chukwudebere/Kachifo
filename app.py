@@ -10,6 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 import json
 from werkzeug.exceptions import HTTPException, BadRequest
 from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf
+import re
+from logging.handlers import RotatingFileHandler
 
 # Initialize Flask app
 app = Flask(__name__)
