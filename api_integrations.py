@@ -101,7 +101,7 @@ def summarize_with_hf(text: str) -> str:
     try:
         logger.info("Calling Hugging Face Summarization API")
         # Make the summarization call
-        response = inference_summary.summarization(inputs=text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
+        response = inference_summary.summarization(text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
         summary = response.get('summary_text', "No summary available")
 
         # Cache the result
@@ -122,7 +122,7 @@ def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
     try:
         logger.info("Calling Hugging Face NER API")
         # Make the NER call
-        response = inference_ner.token_classification(inputs=text)
+        response = inference_ner.token_classification(text)
         entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
 
         # Cache the result
