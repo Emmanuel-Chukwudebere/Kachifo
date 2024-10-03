@@ -217,7 +217,7 @@ def recent_searches():
         logger.info(f"Fetched {len(recent_searches_processed)} recent searches")
         return create_standard_response(recent_searches_processed, 200, "Recent searches retrieved successfully")
 
-        except SQLAlchemyError as e:
+    except SQLAlchemyError as e:
         logger.error(f"Database error while fetching recent searches: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "A database error occurred while fetching recent searches")
     except Exception as e:
