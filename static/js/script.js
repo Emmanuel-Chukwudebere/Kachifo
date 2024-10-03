@@ -6,9 +6,10 @@ const chatWindow = document.querySelector('.chat-window');
 const initialView = document.querySelector('.initial-view');
 const suggestions = document.querySelector('.suggestions');
 const newChatIcon = document.querySelector('.new-chat-icon');
-const loadingGifPath = 'static/icons/typing-gif.gif';
-const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg';
-const loadingSpinner = document.getElementById('loading-spinner');
+const loadingSpinner = document.getElementById('loading-spinner'); // Loading spinner element
+
+const loadingGifPath = 'static/icons/typing-gif.gif'; // Path to loading GIF
+const kachifoLogoPath = 'static/logo/kachifo-logo-small.svg'; // Ensure this path is correct
 
 // Debounce function to limit the rate of function calls
 function debounce(func, wait) {
@@ -54,7 +55,7 @@ function createChatBubble(message, sender, isTyping = false) {
     // Add Kachifo logo only for Kachifo messages
     if (sender === 'kachifo' && !isTyping) {
         const kachifoLogo = document.createElement('img');
-        kachifoLogo.src = kachifoLogoPath;
+        kachifoLogo.src = kachifoLogoPath; // Ensure the logo path is correct
         kachifoLogo.alt = 'Kachifo Logo';
         kachifoLogo.classList.add('kachifo-logo-small');
         bubble.appendChild(kachifoLogo);
@@ -74,7 +75,9 @@ function createChatBubble(message, sender, isTyping = false) {
     }
 
     bubble.appendChild(messageContent);
-    chatWindow.append
+    chatWindow.appendChild(bubble);
+    scrollToBottom();
+}
 
 // Function to handle sending a message
 async function sendMessage() {
@@ -84,7 +87,7 @@ async function sendMessage() {
     console.log('Search initiated:', message); // Log the user's query
     createChatBubble(message, 'user');
     userInput.value = '';
-    loadingSpinner.style.display = 'block';
+    loadingSpinner.style.display = 'block'; // Show loading spinner
 
     const typingBubble = createChatBubble('', 'kachifo', true);
     try {
@@ -105,7 +108,7 @@ async function sendMessage() {
         // Process response
         if (data.data) {
             createChatBubble(data.data.dynamic_response, 'kachifo');
-            // Continue to handle results and summaries...
+            // Handle additional processing of results and summaries...
         } else if (data.error) {
             createChatBubble(data.error, 'kachifo');
         } else {
@@ -116,7 +119,7 @@ async function sendMessage() {
         typingBubble.remove();
         createChatBubble("I'm sorry, something went wrong on my end.", 'kachifo');
     } finally {
-        loadingSpinner.style.display = 'none';
+        loadingSpinner.style.display = 'none'; // Hide loading spinner when processing is complete
     }
 }
 
@@ -135,9 +138,7 @@ function isDesktop() {
 }
 
 // Event listener for the send button
-sendBtn.addEventListener('click', () => {
-    sendMessage();
-});
+sendBtn.addEventListener('click', sendMessage);
 
 // Event listener for pressing "Enter" key in the input field (only for desktop)
 userInput.addEventListener('keypress', (e) => {
@@ -168,10 +169,6 @@ document.querySelectorAll('.suggestion').forEach(suggestion => {
 });
 
 // Event listener for the New Chat icon
-newChatIcon.addEventListener('click', resetChat);
-
-// Attach event listeners and initialize chat
-sendBtn.addEventListener('click', sendMessage);
 newChatIcon.addEventListener('click', resetChat);
 
 // Initial scroll to bottom on page load
