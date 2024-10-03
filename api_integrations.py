@@ -42,9 +42,11 @@ HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"  # Summarization model
 HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"  # NER model
 
-# Initialize the Hugging Face Hub Inference API
-inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
-inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
+# Initialize the InferenceClient for summarization
+inference_summary = InferenceClient(model="facebook/bart-large-cnn", token=os.getenv('HUGGINGFACE_API_KEY'))
+
+# Initialize the InferenceClient for NER
+inference_ner = InferenceClient(model="dbmdz/bert-large-cased-finetuned-conll03-english", token=os.getenv('HUGGINGFACE_API_KEY'))
 
 # Cache setup: 1-hour time-to-live, max 1000 items
 summary_cache = TTLCache(maxsize=1000, ttl=3600)
@@ -92,12 +94,13 @@ def summarize_with_hf(text: str) -> str:
     """Summarizes text using Hugging Face Hub API."""
     # Check if summarization result is already cached
     if text in summary_cache:
+        logger.info("Cache hit for summarization")
         return summary_cache[text]
     
     try:
         logger.info("Calling Hugging Face Summarization API")
         response = inference_summary(inputs=text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
-        summary = response.get('summary_text', "No summary available")
+        summary = response['summary_text']  # Access the summary text correctly
         
         # Cache the result
         summary_cache[text] = summary
@@ -106,17 +109,17 @@ def summarize_with_hf(text: str) -> str:
         logger.error(f"Error calling Hugging Face Summarization API: {str(e)}")
         return "Sorry, summarization is unavailable at the moment."
 
-# Hugging Face NER API with caching
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
     """Extracts named entities using Hugging Face Hub API."""
     # Check if NER result is already cached
     if text in entity_cache:
+        logger.info("Cache hit for NER")
         return entity_cache[text]
 
     try:
         logger.info("Calling Hugging Face NER API")
-        response = inference_ner(inputs=text)
+        response = inference_ner(inputs=text)  # Call the NER method correctly
         entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
         
         # Cache the result
