@@ -239,6 +239,9 @@ def process_query():
 
         query = sanitize_input(query)
         logger.debug(f"Sanitized query: {query}")
+        
+        logger.debug(f"Request headers: {request.headers}")
+        logger.debug(f"Request data: {request.json}")
 
         # Extract entities from query using Hugging Face API
         processed_query_data = extract_entities_with_hf(query)
