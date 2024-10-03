@@ -1,16 +1,15 @@
 import os
+import requests
+import logging
 from flask import Flask, request, jsonify, render_template, Response, make_response, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_caching import Cache
 from flask_talisman import Talisman
 from functools import wraps
-import logging
-from logging.handlers import RotatingFileHandler
-import re
-from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf
-from werkzeug.exceptions import HTTPException, BadRequest
 from sqlalchemy.exc import SQLAlchemyError
 import json
+from werkzeug.exceptions import HTTPException, BadRequest
+from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -54,9 +53,7 @@ class UserQuery(db.Model):
         self.entities = json.dumps(processed_data.get('entities', []))
 
     def get_hf_data(self):
-        return {
-            'entities': json.loads(self.entities) if self.entities else []
-        }
+        return {'entities': json.loads(self.entities) if self.entities else []}
 
 # Advanced logging setup
 def setup_logging():
@@ -64,15 +61,19 @@ def setup_logging():
     log_file = os.environ.get('LOG_FILE', 'kachifo.log')
     max_log_size = 10 * 1024 * 1024  # 10 MB
     backup_count = 5
+
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    file_handler = RotatingFileHandler(log_file, maxBytes=max_log_size, backupCount=backup_count)
+    file_handler = logging.handlers.RotatingFileHandler(log_file, maxBytes=max_log_size, backupCount=backup_count)
     file_handler.setFormatter(formatter)
+
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
+
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
+
     for logger_name in ('werkzeug', 'sqlalchemy.engine'):
         logger = logging.getLogger(logger_name)
         logger.handlers = []
@@ -118,15 +119,18 @@ def rate_limit(func):
             return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
         logger.info(f"Remaining global requests: {remaining_requests - 1}")
+
         response = func(*args, **kwargs)
         if isinstance(response, tuple):
             data, status_code = response
             response = make_response(jsonify(data), status_code)
         elif not isinstance(response, Response):
             response = make_response(jsonify(response), 200)
+
         response.headers['X-RateLimit-Remaining'] = str(remaining_requests - 1)
         response.headers['X-RateLimit-Limit'] = '60'
         return response
+
     return wrapper
 
 # Input sanitization
@@ -164,6 +168,7 @@ def search_trends():
 
         # Fetch trending topics (results from external APIs)
         results = fetch_trending_topics(query)
+
         current_app.logger.info(f"Search results for '{query}': {len(results)} items found")
 
         # Summarize results
@@ -177,15 +182,15 @@ def search_trends():
                 'url': result.get('url', '')
             })
 
-        # Generate a conversational response (this could be enhanced with a language model if available)
+        # Generate a conversational response
         friendly_response = f"Here's what I found about {query}. Let me know if you want to know more about any specific topic!"
-
         return create_standard_response({
             'query': query,
             'processed_query': processed_query_data,
             'results': summaries,
             'dynamic_response': friendly_response
         }, 200, "Search query processed successfully")
+
     except BadRequest as e:
         logger.error(f"Bad request: {str(e)}")
         return create_standard_response(None, 400, str(e))
@@ -199,14 +204,17 @@ def recent_searches():
     try:
         recent_queries = UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
         recent_searches_processed = []
+
         for query in recent_queries:
             recent_searches_processed.append({
                 'query': query.query,
                 'timestamp': query.timestamp.isoformat(),
                 'processed_data': query.get_hf_data()
             })
+
         logger.info(f"Fetched {len(recent_searches_processed)} recent searches")
         return create_standard_response(recent_searches_processed, 200, "Recent searches retrieved successfully")
+
     except SQLAlchemyError as e:
         logger.error(f"Database error while fetching recent searches: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "A database error occurred while fetching recent searches")
@@ -230,32 +238,41 @@ def process_query():
         query = sanitize_input(query)
         logger.debug(f"Sanitized query: {query}")
 
+        # Extract entities from query using Hugging Face API
         processed_query_data = extract_entities_with_hf(query)
+
+        # Store the query in the database
         new_query = UserQuery(query=query)
         new_query.set_hf_data(processed_query_data)
         db.session.add(new_query)
         db.session.commit()
-        logger.info("Query stored in database")
 
-        # Fetch results from APIs
+        logger.info("Query stored in the database")
+
+        # Fetch results from external APIs (YouTube, Google, News, etc.)
         results = fetch_trending_topics(query)
-        logger.info("Sending response")
+        logger.info("Sending response with the search results")
+
         return create_standard_response(results, 200, "Query processed successfully")
+
+    except SQLAlchemyError as e:
+        logger.error(f"Database error: {str(e)}", exc_info=True)
+        return create_standard_response(None, 500, "A database error occurred. Please try again later.")
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    # Pass through HTTP errors
+    # Handle HTTP errors
     if isinstance(e, HTTPException):
         return e
 
-    # Now you're handling non-HTTP exceptions only
-    logger.error(f"An unhandled exception occurred: {str(e)}", exc_info=True)
+    # Log non-HTTP exceptions
+    logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
     return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
 if __name__ == '__main__':
     with app.app_context():
-        db.create_all()
+        db.create_all()  # Initialize the database
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
