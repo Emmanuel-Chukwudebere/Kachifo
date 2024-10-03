@@ -51,23 +51,21 @@ summary_cache = TTLCache(maxsize=1000, ttl=3600)
 entity_cache = TTLCache(maxsize=1000, ttl=3600)
 
 # Rate limit configuration
-last_called = 0  # Initialize as global
-
 def rate_limited(max_per_second: float):
-    """Rate limit decorator."""
-    min_interval = 1.0 / max_per_second
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            global last_called
-            elapsed = time.time() - last_called
-            wait_time = min_interval - elapsed
-            if wait_time > 0:
-                time.sleep(wait_time)
-            last_called = time.time()
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
+    min_interval = 1.0 / max_per_second
+    last_called = [0.0]
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            elapsed = time.time() - last_called[0]
+            wait_time = min_interval - elapsed
+            if wait_time > 0:
+                time.sleep(wait_time)
+            last_called[0] = time.time()
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # Retry logic with exponential backoff
 def retry_with_backoff(exceptions, tries=3, delay=1, backoff=2):
