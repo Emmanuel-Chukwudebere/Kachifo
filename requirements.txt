@@ -39,6 +39,7 @@ h11
 httpcore
 httplib2
 httpx
+huggingface_hub
 idna
 itsdangerous
 Jinja2
