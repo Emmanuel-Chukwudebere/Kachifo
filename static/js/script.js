@@ -35,14 +35,17 @@ function formatMessageWithLinks(message) {
     // Truncate the message if it exceeds the limit
     let displayMessage = message.length > MAX_LENGTH ? message.slice(0, MAX_LENGTH) + '... [Read More]' : message;
 
+    // Regular expression to match URLs
     const urlRegex = /(https?:\/\/[^\s]+)/g;
+    
+    // Replace URLs with clickable <a> links
     return displayMessage.replace(urlRegex, (url) => {
-        const encodedUrl = encodeURI(url);
+        const encodedUrl = encodeURI(url); // Encode the URL to ensure proper formatting
         return `<a href="${encodedUrl}" target="_blank" rel="noopener noreferrer">${encodedUrl}</a>`;
     });
 }
 
-// Function to create chat bubbles
+// Function to create chat bubbles, including Kachifo logo
 function createChatBubble(message, sender, isTyping = false) {
     const bubble = document.createElement('div');
     bubble.classList.add(sender === 'kachifo' ? 'kachifo-message' : 'user-message');
@@ -51,7 +54,7 @@ function createChatBubble(message, sender, isTyping = false) {
     // Add Kachifo logo only for Kachifo messages
     if (sender === 'kachifo' && !isTyping) {
         const kachifoLogo = document.createElement('img');
-        kachifoLogo.src = kachifoLogoPath; // Ensure the logo path is correct
+        kachifoLogo.src = kachifoLogoPath;
         kachifoLogo.alt = 'Kachifo Logo';
         kachifoLogo.classList.add('kachifo-logo-small');
         bubble.appendChild(kachifoLogo);
@@ -67,34 +70,23 @@ function createChatBubble(message, sender, isTyping = false) {
         loadingGif.classList.add('loading-gif');
         messageContent.appendChild(loadingGif);
     } else {
-        messageContent.innerHTML = formatMessageWithLinks(message);
+        messageContent.innerHTML = formatMessageWithLinks(message); // Format message with links
     }
 
     bubble.appendChild(messageContent);
-    chatWindow.appendChild(bubble);
-    scrollToBottom();
-    return bubble;
-}
+    chatWindow.append
 
 // Function to handle sending a message
-async function sendMessage(message) {
-    if (!message) {
-        message = userInput.value.trim();
-    }
+async function sendMessage() {
+    const message = userInput.value.trim();
     if (message === '') return;
 
-    console.log('Sending query:', { query: message });
+    console.log('Search initiated:', message); // Log the user's query
     createChatBubble(message, 'user');
     userInput.value = '';
-    userInput.style.height = 'auto';
-    initialView.classList.add('hidden');
-    suggestions.classList.add('hidden');
-    chatWindow.classList.add('active');
-
-    // Show loading spinner and typing indicator
     loadingSpinner.style.display = 'block';
-    const typingBubble = createChatBubble('', 'kachifo', true);
 
+    const typingBubble = createChatBubble('', 'kachifo', true);
     try {
         const response = await fetch('/process-query', {
             method: 'POST',
@@ -102,35 +94,29 @@ async function sendMessage(message) {
             body: JSON.stringify({ q: message }),
         });
 
+        console.log('Response status:', response.status); // Log the response status
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            throw new Error(`HTTP error! Status: ${response.status}`);
         }
 
         const data = await response.json();
         typingBubble.remove();
 
-        // Display the results returned by the API
-        if (data.data && data.data.general_summary && data.data.dynamic_response && data.data.results) {
-            let combinedResponse = `${data.data.general_summary} ${data.data.dynamic_response}`;
-
-            // Iterate over results and append to the response
-            data.data.results.forEach(item => {
-                combinedResponse += `<br><br>I found a result: <strong>${item.title}</strong>. ${item.summary} <a href="${item.url}" target="_blank">Read more</a>`;
-            });
-
-            createChatBubble(combinedResponse, 'kachifo');
+        // Process response
+        if (data.data) {
+            createChatBubble(data.data.dynamic_response, 'kachifo');
+            // Continue to handle results and summaries...
         } else if (data.error) {
-            createChatBubble(`I'm sorry, but there was an error: ${data.error}`, 'kachifo');
+            createChatBubble(data.error, 'kachifo');
         } else {
-            createChatBubble("Something went wrong. Please try again.", 'kachifo');
+            createChatBubble("Unexpected response format.", 'kachifo');
         }
-
     } catch (error) {
         console.error('Error:', error);
         typingBubble.remove();
-        createChatBubble("Sorry, something went wrong. Let's try that again!", 'kachifo');
+        createChatBubble("I'm sorry, something went wrong on my end.", 'kachifo');
     } finally {
-        loadingSpinner.style.display = 'none'; // Hide loading spinner when processing is done
+        loadingSpinner.style.display = 'none';
     }
 }
 
