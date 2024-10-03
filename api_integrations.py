@@ -54,6 +54,7 @@ entity_cache = TTLCache(maxsize=1000, ttl=3600)
 
 # Rate limit configuration
 def rate_limited(max_per_second: float):
+    """Limits the number of API calls per second."""
     min_interval = 1.0 / max_per_second
     last_called = [0.0]
 
@@ -70,62 +71,64 @@ def rate_limited(max_per_second: float):
     return decorator
 
 # Retry logic with exponential backoff
-def retry_with_backoff(exceptions, tries=3, delay=1, backoff=2):
-    """Retry decorator with exponential backoff."""
+def retry_with_backoff(exceptions, tries=3, delay=2, backoff=2):
+    """Retry decorator for functions in case of failure."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            mtries, mdelay = tries, delay
-            while mtries > 1:
+            _tries, _delay = tries, delay
+            while _tries > 1:
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    logger.warning(f"{func.__name__} failed. Retrying in {mdelay} seconds... Error: {str(e)}")
-                    time.sleep(mdelay)
-                    mtries -= 1
-                    mdelay *= backoff
+                    logger.warning(f"{func.__name__} failed due to {str(e)}, retrying in {_delay} seconds...")
+                    time.sleep(_delay)
+                    _tries -= 1
+                    _delay *= backoff
             return func(*args, **kwargs)
         return wrapper
     return decorator
 
-# Hugging Face Summarization API with caching
+@rate_limited(max_per_second=1.0)  # Customize this based on API rate limits
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def summarize_with_hf(text: str) -> str:
-    """Summarizes text using Hugging Face Hub API."""
+    """Summarizes text using Hugging Face Hub API with caching."""
     # Check if summarization result is already cached
     if text in summary_cache:
         logger.info("Cache hit for summarization")
         return summary_cache[text]
-    
+
     try:
         logger.info("Calling Hugging Face Summarization API")
-        response = inference_summary.predict(inputs=text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
-        summary = response['summary_text']  # Access the summary text correctly
-        
+        # Make the summarization call
+        response = inference_summary.summarization(inputs=text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
+        summary = response.get('summary_text', "No summary available")
+
         # Cache the result
         summary_cache[text] = summary
         return summary
-    except (RequestException, Timeout) as e:
+    except Exception as e:
         logger.error(f"Error calling Hugging Face Summarization API: {str(e)}")
         return "Sorry, summarization is unavailable at the moment."
 
+@rate_limited(max_per_second=1.0)  # Customize this based on API rate limits
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
-    """Extracts named entities using Hugging Face Hub API."""
-    # Check if NER result is already cached
+    """Extracts named entities using Hugging Face Hub API with caching."""
     if text in entity_cache:
         logger.info("Cache hit for NER")
         return entity_cache[text]
 
     try:
         logger.info("Calling Hugging Face NER API")
-        response = inference_ner.predict(inputs=text)  # Call the NER method correctly
+        # Make the NER call
+        response = inference_ner.token_classification(inputs=text)
         entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
-        
+
         # Cache the result
         entity_cache[text] = {"entities": entities}
         return {"entities": entities}
-    except (RequestException, Timeout) as e:
+    except Exception as e:
         logger.error(f"Error calling Hugging Face NER API: {str(e)}")
         return {"entities": []}
 
