@@ -161,7 +161,7 @@ def classify_input_type(user_input):
 def stream_with_loading_messages(query):
     try:
         # Sending loading messages
-        for _ in range(5):  # Adjust the number of loading messages as needed
+        for _ in range(10):  # Adjust the number of loading messages as needed
             yield f"data: {random.choice(loading_messages)}\n\n"
             time.sleep(2)  # Wait before sending the next loading message
         
@@ -210,7 +210,7 @@ def stream_with_loading_messages(query):
 # Generate conversational response using BlenderBot
 def generate_conversational_response(user_input):
     # Replace with your Hugging Face API call to BlenderBot
-    inference_client = InferenceClient(repo_id="facebook/blenderbot-400M-distill")  # Adjust based on your model
+    inference_client = InferenceClient(model="facebook/blenderbot-400M-distill")  # Adjust based on your model
     response = inference_client.chat(user_input)  # Call the chat method to get a response
     return response['generated_text']  # Adjust according to the response format
 
