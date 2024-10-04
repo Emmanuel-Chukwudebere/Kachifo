@@ -140,25 +140,24 @@ def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
         logger.error(f"Error calling Hugging Face NER API: {str(e)}")
         return {"entities": []}
 
-@rate_limited(max_per_second=1.0)  # Customize based on API rate limits
+@rate_limited(max_per_second=1.0)
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def generate_conversational_response(user_input: str) -> str:
     """Generate a conversational response using BlenderBot."""
     try:
         logger.info(f"Generating conversational response for input: {user_input[:100]}...")
 
-        # Construct the input for the chat model
-        messages = [{"role": "user", "content": user_input}]
-        
-        # Call the chat completion method on the inference client
-        response = inference_bot.chat_completion(messages=messages)  # Correct usage
+        # Apply truncation if the input is too long
+        response = inference_bot.text_generation(user_input, parameters={"truncation": "only_first"})  # Truncate the input if it's too long
 
-        # Extract and return the generated text from the response
-        generated_response = response['choices'][0]['message']['content']
+        # Extract the generated text from the response
+        generated_response = response.get('generated_text', "No response available")
+        logger.info(f"Conversational response generated: {generated_response[:100]}...")
         return generated_response
     except Exception as e:
         logger.error(f"Error generating conversational response: {str(e)}")
         return "I'm sorry, I couldn't respond to that."
+
         
 # Fetch trending topics (combined from multiple sources)
 @retry_with_backoff((RequestException, Timeout), tries=3)

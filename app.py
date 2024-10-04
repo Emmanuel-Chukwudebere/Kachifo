@@ -170,78 +170,76 @@ def fetch_results(query):
         app.logger.error(f"Error fetching results: {str(e)}")
         results = []  # Indicate failure
 
-def stream_with_loading_messages(query):
-    """Stream loading messages and API results."""
-    global results
-
+def generate_conversational_response(user_input: str) -> str:
+    """Generate a conversational response using BlenderBot."""
     try:
-        # Start fetching results in a separate thread
-        fetch_thread = threading.Thread(target=fetch_results, args=(query,))
-        fetch_thread.start()
+        logger.info(f"Generating conversational response for input: {user_input[:100]}...")
 
-        # Continue streaming loading messages while fetching results
-        while fetch_thread.is_alive():
-            yield f"data: {random.choice(loading_messages)}\n\n"
-            time.sleep(2)
-
-        # Once fetching is complete, process the results
-        if not results:
-            yield f"data: {{'error': 'No results found or an error occurred.'}}\n\n"
-            return
-
-        summaries = []
-        individual_summaries = []
-
-        for result in results:
-            title = result.get('title', '')
-            summary = result.get('summary', '')
-            full_summary = summarize_with_hf(f"{title} {summary}")
-            individual_summaries.append(full_summary)
-            summaries.append({
-                'source': result.get('source', ''),
-                'title': title,
-                'summary': full_summary,
-                'url': result.get('url', '')
-            })
-
-        general_summary = generate_general_summary(individual_summaries)
-
-        # Construct conversational response using BlenderBot
-        bot_prompt = (
-            f"User asked about trends in {query}. Here are the results:\n\n"
-            f"General Summary: {general_summary}\n\n"
-            f"Individual Results:\n" + "\n".join([f"- {s['title']}: {s['summary']}" for s in summaries])
-        )
-        conversational_response = generate_conversational_response(bot_prompt)
-
-        final_response = {
-            'query': query,
-            'results': summaries,
-            'general_summary': general_summary,
-            'dynamic_response': conversational_response
-        }
-
-        yield f"data: {json.dumps(final_response)}\n\n"
-        app.logger.info(f"Streaming completed for '{query}'")
-    except Exception as e:
-        app.logger.error(f"Error while processing search: {str(e)}", exc_info=True)
-        yield f"data: {{'error': 'An unexpected error occurred. Please try again later.'}}\n\n"
-
-# Generate conversational response using BlenderBot
-def generate_conversational_response(user_input):
-    # Initialize the inference client for the chat model
-    inference_client = InferenceClient(model="facebook/blenderbot-400M-distill", token=os.getenv('HUGGINGFACE_API_KEY'))
-
-    try:
-        # Pass the user input as a single string, not as a list of messages
-        response = inference_client.text_generation(user_input)  # Correct method call
+        # Apply truncation if the input is too long
+        response = inference_bot.text_generation(user_input, parameters={"truncation": "only_first"})  # Truncate long inputs
 
         # Extract the generated text from the response
-        generated_response = response['generated_text']  # Adjust according to response format
+        generated_response = response.get('generated_text', "No response available")
+        logger.info(f"Conversational response generated: {generated_response[:100]}...")
         return generated_response
     except Exception as e:
         logger.error(f"Error generating conversational response: {str(e)}")
         return "I'm sorry, I couldn't respond to that."
+
+def stream_with_loading_messages(query):
+    """Stream loading messages and final API results."""
+    try:
+        fetch_thread = threading.Thread(target=fetch_results, args=(query,))
+        fetch_thread.start()
+
+        # Stream loading messages while fetching results in the background
+        while fetch_thread.is_alive():
+            yield f"data: {random.choice(loading_messages)}\n\n"
+            time.sleep(2)
+
+        fetch_thread.join()  # Ensure all results are fetched
+
+        # If results were fetched, stream them
+        if results:
+            summaries = []
+            individual_summaries = []
+
+            for result in results:
+                title = result.get('title', '')
+                summary = result.get('summary', '')
+                full_summary = summarize_with_hf(f"{title} {summary}")
+                individual_summaries.append(full_summary)
+                summaries.append({
+                    'source': result.get('source', ''),
+                    'title': title,
+                    'summary': full_summary,
+                    'url': result.get('url', '')
+                })
+
+            general_summary = generate_general_summary(individual_summaries)
+
+            # Construct a conversational response using BlenderBot
+            bot_prompt = (
+                f"User asked about trends in {query}. Here are the results:\n\n"
+                f"General Summary: {general_summary}\n\n"
+                f"Individual Results:\n" + "\n".join([f"- {s['title']}: {s['summary']}" for s in summaries])
+            )
+            conversational_response = generate_conversational_response(bot_prompt)
+
+            # Send the final result as a stream
+            final_response = {
+                'query': query,
+                'results': summaries,
+                'general_summary': general_summary,
+                'dynamic_response': conversational_response
+            }
+            yield f"data: {json.dumps(final_response)}\n\n"
+            logger.info(f"Streaming completed for '{query}'")
+        else:
+            yield f"data: {{'error': 'No results found.'}}\n\n"
+    except Exception as e:
+        logger.error(f"Error while processing search: {str(e)}", exc_info=True)
+        yield f"data: {{'error': 'An unexpected error occurred. Please try again later.'}}\n\n"
 
 
 # Routes

@@ -36,38 +36,59 @@ function formatMessageWithLinks(message) {
     });
 }
 
-// Function to create chat bubbles with Kachifo logo and loading indicator
+
+// Function to handle streaming responses
+function startStreaming(message, typingBubble) {
+    const eventSource = new EventSource(/interact?input=${encodeURIComponent(message)});
+
+    eventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+
+        if (data.error) {
+            typingBubble.innerHTML = data.error;  // Replace content with error message
+            eventSource.close();
+        } else if (data.results) {
+            // Replace the loading messages with the final results
+            const combinedResponse = data.results.map(item =>
+                ${item.title}: ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more</a>
+            ).join('\n\n');
+            typingBubble.innerHTML = combinedResponse;  // Update the same bubble with final result
+            eventSource.close();  // Close the connection once final result is received
+        } else {
+            // Handle streaming loading messages by updating the same bubble
+            typingBubble.innerHTML = data;  // Replace old loading message with new one
+        }
+    };
+
+    eventSource.onerror = function(error) {
+        console.error("EventSource failed:", error);
+        typingBubble.innerHTML = "I'm sorry, but something went wrong while fetching the data.";  // Display error in the same bubble
+        eventSource.close();
+    };
+}
+
+// Function to create chat bubbles with dynamic content (updatable bubble)
 function createChatBubble(message, sender, isTyping = false) {
     const bubble = document.createElement('div');
     bubble.classList.add(sender === 'kachifo' ? 'kachifo-message' : 'user-message');
     bubble.setAttribute('aria-live', 'polite');
 
-    if (sender === 'kachifo' && !isTyping) {
-        const kachifoLogo = document.createElement('img');
-        kachifoLogo.src = kachifoLogoPath;
-        kachifoLogo.alt = 'Kachifo Logo';
-        kachifoLogo.classList.add('kachifo-logo-small');
-        bubble.appendChild(kachifoLogo);
-    }
-
     const messageContent = document.createElement('div');
     messageContent.classList.add('message-content');
+
     if (isTyping) {
-        const loadingGif = document.createElement('img');
-        loadingGif.src = loadingGifPath;
-        loadingGif.alt = 'Kachifo is typing...';
-        loadingGif.classList.add('loading-gif');
-        messageContent.appendChild(loadingGif);
+        bubble.innerHTML = '';  // Initially blank for the typing bubble (will be updated)
     } else {
-        messageContent.innerHTML = formatMessageWithLinks(message);
+        messageContent.innerHTML = formatMessageWithLinks(message);  // Static message for non-streaming bubbles
     }
 
     bubble.appendChild(messageContent);
     chatWindow.appendChild(bubble);
     scrollToBottom();
+    return messageContent;  // Return the element so we can update it later
 }
 
-// Function to handle sending a message
+// Adjust the sendMessage function to use a single bubble for streaming
 async function sendMessage(message) {
     if (!message) {
         message = userInput.value.trim();
@@ -83,58 +104,27 @@ async function sendMessage(message) {
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
 
-    const typingBubble = createChatBubble('', 'kachifo', true); // Show loading GIF
+    const typingBubble = createChatBubble('', 'kachifo', true);  // Show loading GIF
 
-    // Sending a POST request for the user input
     try {
         const response = await fetch('/interact', {
-            method: 'POST',  // Use POST for sending user input
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ input: message }),  // Send the user input as JSON
+            body: JSON.stringify({ input: message }),
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            throw new Error(HTTP error! status: ${response.status});
         }
 
-        // Start streaming responses
+        // Start streaming responses into the same bubble
         startStreaming(message, typingBubble);
     } catch (error) {
         console.error('Error:', error);
-        typingBubble.remove(); // Remove loading GIF on error
-        createChatBubble("I'm sorry, but something went wrong on my end. Could we try that again?", 'kachifo');
+        typingBubble.innerHTML = "I'm sorry, but something went wrong on my end. Could we try that again?";  // Update same bubble with error
     }
-}
-
-// Function to handle streaming responses
-function startStreaming(message, typingBubble) {
-    const eventSource = new EventSource(`/interact?input=${encodeURIComponent(message)}`);
-
-    eventSource.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        if (data.error) {
-            createChatBubble(data.error, 'kachifo');
-            typingBubble.remove(); // Remove loading GIF if there's an error
-            eventSource.close();
-        } else if (data.results) {
-            typingBubble.remove(); // Remove loading GIF when results are received
-            const combinedResponse = data.results.map(item =>
-                `${item.title}: ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more</a>`
-            ).join('\n\n');
-            createChatBubble(combinedResponse, 'kachifo');
-        } else {
-            createChatBubble(data, 'kachifo'); // Display loading messages as they come
-        }
-    };
-
-    eventSource.onerror = function(error) {
-        console.error("EventSource failed:", error);
-        createChatBubble("I'm sorry, but something went wrong while fetching the data.", 'kachifo');
-        typingBubble.remove(); // Ensure typing bubble is removed
-        eventSource.close();
-    };
 }
 
 
