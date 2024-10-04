@@ -31,7 +31,7 @@ const scrollToBottom = debounce(() => {
 function formatMessageWithLinks(message) {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     return message.replace(urlRegex, (url) => {
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer">Read more</a>`;
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">[”]</a>`;
     });
 }
 
