@@ -30,11 +30,9 @@ const scrollToBottom = debounce(() => {
 // Function to format the message by converting URLs into clickable 'Read more' links
 function formatMessageWithLinks(message) {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
-    
     // Replace URLs with 'Read more' links
     return message.replace(urlRegex, (url) => {
-        const encodedUrl = encodeURI(url);
-        return `<a href="${encodedUrl}" target="_blank" rel="noopener noreferrer">Read more</a>`;
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">Read more</a>`;
     });
 }
 
@@ -54,7 +52,6 @@ function createChatBubble(message, sender, isTyping = false) {
 
     const messageContent = document.createElement('div');
     messageContent.classList.add('message-content');
-
     if (isTyping) {
         const loadingGif = document.createElement('img');
         loadingGif.src = loadingGifPath;
@@ -68,7 +65,6 @@ function createChatBubble(message, sender, isTyping = false) {
     bubble.appendChild(messageContent);
     chatWindow.appendChild(bubble);
     scrollToBottom();
-    return bubble;
 }
 
 // Function to handle sending a message
@@ -76,6 +72,7 @@ async function sendMessage(message) {
     if (!message) {
         message = userInput.value.trim();
     }
+
     if (message === '') return;
 
     console.log('Search initiated', { query: message, timestamp: new Date().toISOString() });
@@ -88,56 +85,37 @@ async function sendMessage(message) {
 
     const typingBubble = createChatBubble('', 'kachifo', true);
 
-    try {
-        const response = await fetch('/process-query', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ q: message }),
-            timeout: 30000 // 30 seconds timeout
-        });
+    // Create a new EventSource for streaming responses
+    const eventSource = new EventSource(`/interact`);
 
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+    eventSource.onopen = function() {
+        console.log("Connection to server opened.");
+    };
 
-        const data = await response.json();
-        typingBubble.remove();
+    eventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
 
-        // Handling the API response with general_summary, individual_summaries, and dynamic_response
-        if (data.data && data.data.general_summary && data.data.dynamic_response && data.data.results) {
-            let combinedResponse = `${data.data.general_summary} ${data.data.dynamic_response}`;
-
-            const getFriendlySourceName = (source) => {
-                const sourceMap = {
-                    'YouTube': 'a video',
-                    'News Article': 'a recent news article',
-                    'Google': 'a web search result',
-                    'Twitter': 'a trending tweet',
-                    'Reddit': 'a discussion on Reddit'
-                };
-                return sourceMap[source] || 'an interesting source';
-            };
-
-            data.data.results.forEach(item => {
-                combinedResponse += `\n\nI came across ${getFriendlySourceName(item.source)} I think you might find interesting! Here it is: <strong>${item.title}</strong>. ${item.summary} <a href="{ item.url }" target="_blank" rel="noopener noreferrer">Read more</a>`;
-            });
-
-            combinedResponse += "\n\nIs there any specific aspect of these trends you'd like to explore further? Or perhaps you have another topic in mind?";
+        if (data.error) {
+            typingBubble.remove();
+            createChatBubble(data.error, 'kachifo');
+            eventSource.close();
+        } else if (data.results) {
+            typingBubble.remove();
+            const combinedResponse = data.results.map(item => 
+                `${item.title}: ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more</a>`
+            ).join('\n\n');
 
             createChatBubble(combinedResponse, 'kachifo');
-        } else if (data.error) {
-            createChatBubble(`I'm sorry, but I encountered an issue while searching: ${data.error}. Could you try rephrasing your query or asking about something else?`, 'kachifo');
-        } else {
-            createChatBubble("I apologize, but I'm having trouble processing that request right now. Could you try asking something else?", 'kachifo');
-            console.error('Unexpected response format:', data);
+            eventSource.close();
         }
-    } catch (error) {
-        console.error('Error:', error);
+    };
+
+    eventSource.onerror = function(error) {
+        console.error("EventSource failed:", error);
         typingBubble.remove();
         createChatBubble("I'm sorry, but something went wrong on my end. Could we try that again?", 'kachifo');
-    }
+        eventSource.close();
+    };
 }
 
 // Function to reset the chat
