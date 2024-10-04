@@ -134,6 +134,13 @@ function isDesktop() {
 
 // Event listener for the send button
 sendBtn.addEventListener('click', () => {
+    // Track the button click event
+    gtag('event', 'click', {
+        'event_category': 'Button',
+        'event_label': 'Send Message',
+        'value': 1
+    });
+
     sendMessage();
 });
 
