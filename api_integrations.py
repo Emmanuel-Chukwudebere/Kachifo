@@ -89,18 +89,23 @@ def retry_with_backoff(exceptions, tries=3, delay=2, backoff=2):
     return decorator
 
 # General summary from individual summaries
-def generate_general_summary(individual_summaries: List[str]) -> str:
-    """Generates a general summary using Hugging Face Hub API from individual summaries."""
-    combined_text = " ".join(individual_summaries)  # Combine all individual summaries into one text
-
+@rate_limited(max_per_second=1.0)  # Customize based on API rate limits
+@retry_with_backoff((RequestException, Timeout), tries=3)
+def generate_conversational_response(user_input: str) -> str:
+    """Generate a conversational response using BlenderBot with Hugging Face Hub API."""
     try:
-        logger.info("Calling Hugging Face Summarization API for general summary")
-        response = inference_summary.summarization(combined_text, parameters={"max_length": 200, "min_length": 100, "do_sample": False})
-        general_summary = response.get('summary_text', "No summary available")
-        return general_summary
+        logger.info(f"Generating conversational response for input: {user_input[:100]}...")
+
+        # Pass the user input as a string directly to the text_generation API
+        response = inference_bot.text_generation(user_input)  # Direct string input, just like NER and summarization
+
+        # Extract and return the generated text from the response
+        generated_response = response.get('generated_text', "No response available")
+        logger.info(f"Conversational response generated: {generated_response[:100]}...")  # Log part of the output
+        return generated_response
     except Exception as e:
-        logger.error(f"Error generating general summary: {str(e)}")
-        return "Sorry, I couldn't generate a summary at the moment."
+        logger.error(f"Error generating conversational response: {str(e)}")
+        return "I'm sorry, I couldn't respond to that."
 
 @rate_limited(max_per_second=1.0)  # Customize based on API rate limits
 @retry_with_backoff((RequestException, Timeout), tries=3)

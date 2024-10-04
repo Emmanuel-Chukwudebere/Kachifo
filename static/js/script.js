@@ -119,16 +119,13 @@ function startStreaming(message, typingBubble) {
             typingBubble.remove(); // Remove loading GIF if there's an error
             eventSource.close();
         } else if (data.results) {
-            // Remove loading GIF only when we receive the first data
-            typingBubble.remove(); // Ensure typing bubble is removed
-            // Combine results into a single message
-            const combinedResponse = data.results.map(item => 
+            typingBubble.remove(); // Remove loading GIF when results are received
+            const combinedResponse = data.results.map(item =>
                 `${item.title}: ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more</a>`
             ).join('\n\n');
-            createChatBubble(combinedResponse, 'kachifo'); // Display the streamed response
+            createChatBubble(combinedResponse, 'kachifo');
         } else {
-            // This condition handles the loading messages sent from the server
-            createChatBubble(data, 'kachifo'); // Display the loading message
+            createChatBubble(data, 'kachifo'); // Display loading messages as they come
         }
     };
 
@@ -139,6 +136,7 @@ function startStreaming(message, typingBubble) {
         eventSource.close();
     };
 }
+
 
 // Function to reset the chat
 function resetChat() {

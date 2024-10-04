@@ -158,12 +158,11 @@ def classify_input_type(user_input):
     else:
         return 'conversation'
 
-# Streaming generator function to yield results in real-time
 # Global variable to store results
 results = []
 
-# Function to fetch results in a separate thread
 def fetch_results(query):
+    """Fetch results asynchronously and update the global variable 'results'."""
     global results
     try:
         results = fetch_trending_topics(query)  # Replace with actual fetching logic
@@ -171,20 +170,21 @@ def fetch_results(query):
         app.logger.error(f"Error fetching results: {str(e)}")
         results = []  # Indicate failure
 
-# Streaming generator function to yield results in real-time
 def stream_with_loading_messages(query):
+    """Stream loading messages and API results."""
     global results
 
     try:
+        # Start fetching results in a separate thread
         fetch_thread = threading.Thread(target=fetch_results, args=(query,))
         fetch_thread.start()
 
+        # Continue streaming loading messages while fetching results
         while fetch_thread.is_alive():
             yield f"data: {random.choice(loading_messages)}\n\n"
             time.sleep(2)
 
-        fetch_thread.join()
-
+        # Once fetching is complete, process the results
         if not results:
             yield f"data: {{'error': 'No results found or an error occurred.'}}\n\n"
             return
@@ -206,12 +206,12 @@ def stream_with_loading_messages(query):
 
         general_summary = generate_general_summary(individual_summaries)
 
+        # Construct conversational response using BlenderBot
         bot_prompt = (
             f"User asked about trends in {query}. Here are the results:\n\n"
             f"General Summary: {general_summary}\n\n"
             f"Individual Results:\n" + "\n".join([f"- {s['title']}: {s['summary']}" for s in summaries])
         )
-
         conversational_response = generate_conversational_response(bot_prompt)
 
         final_response = {
@@ -233,18 +233,16 @@ def generate_conversational_response(user_input):
     inference_client = InferenceClient(model="facebook/blenderbot-400M-distill", token=os.getenv('HUGGINGFACE_API_KEY'))
 
     try:
-        # Construct the input for chat completion
-        messages = [{"role": "user", "content": user_input}]
-        
-        # Call chat_completion to get a response
-        response = inference_client.chat_completion(messages=messages)  # Correct usage
-        
+        # Pass the user input as a single string, not as a list of messages
+        response = inference_client.text_generation(user_input)  # Correct method call
+
         # Extract the generated text from the response
-        generated_response = response['choices'][0]['message']['content']
+        generated_response = response['generated_text']  # Adjust according to response format
         return generated_response
     except Exception as e:
         logger.error(f"Error generating conversational response: {str(e)}")
         return "I'm sorry, I couldn't respond to that."
+
 
 # Routes
 @app.route('/')
@@ -258,25 +256,22 @@ def interact():
     if request.method == 'POST':
         user_input = request.json.get('input')
     else:
-        # For GET requests, you may want to retrieve the input from query parameters
         user_input = request.args.get('input')
 
     if not user_input:
-        return jsonify({'error': 'No input provided.'}), 400  # Return error if no input is given
+        return jsonify({'error': 'No input provided.'}), 400
 
-    # Determine if input is conversational or query-related
     input_type = classify_input_type(user_input)
-    
+
     if input_type == 'conversation':
-        # Use BlenderBot to respond to conversational queries
         response = generate_conversational_response(user_input)
     elif input_type == 'query':
-        # Use streaming with loading messages for data fetching
         return Response(stream_with_context(stream_with_loading_messages(user_input)), content_type='text/event-stream')
     else:
-        return jsonify({'error': 'Invalid input type.'}), 400  # Handle invalid input type
+        return jsonify({'error': 'Invalid input type.'}), 400
 
     return jsonify({'response': response})
+
 
 # Routes for searching trends with streaming response
 @app.route('/search', methods=['GET', 'POST'])
