@@ -99,15 +99,8 @@ async function sendMessage(message) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const data = await response.json();
-        typingBubble.remove(); // Remove loading GIF if we get a response
-
-        // Handle the response
-        if (data.response) {
-            createChatBubble(data.response, 'kachifo');
-        } else {
-            createChatBubble("I'm sorry, but I encountered an issue while searching. Could you try rephrasing your query or asking about something else?", 'kachifo');
-        }
+        // Start streaming responses
+        startStreaming(message, typingBubble);
     } catch (error) {
         console.error('Error:', error);
         typingBubble.remove(); // Remove loading GIF on error
@@ -116,27 +109,33 @@ async function sendMessage(message) {
 }
 
 // Function to handle streaming responses
-function startStreaming(message) {
+function startStreaming(message, typingBubble) {
     const eventSource = new EventSource(`/interact?input=${encodeURIComponent(message)}`);
 
     eventSource.onmessage = function(event) {
         const data = JSON.parse(event.data);
         if (data.error) {
             createChatBubble(data.error, 'kachifo');
+            typingBubble.remove(); // Remove loading GIF if there's an error
             eventSource.close();
         } else if (data.results) {
-            // Remove loading GIF here as well
-            typingBubble.remove(); // Ensure typing bubble is removed before displaying results
+            // Remove loading GIF only when we receive the first data
+            typingBubble.remove(); // Ensure typing bubble is removed
+            // Combine results into a single message
             const combinedResponse = data.results.map(item => 
                 `${item.title}: ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more</a>`
             ).join('\n\n');
-            createChatBubble(combinedResponse, 'kachifo');
+            createChatBubble(combinedResponse, 'kachifo'); // Display the streamed response
+        } else {
+            // This condition handles the loading messages sent from the server
+            createChatBubble(data, 'kachifo'); // Display the loading message
         }
     };
 
     eventSource.onerror = function(error) {
         console.error("EventSource failed:", error);
         createChatBubble("I'm sorry, but something went wrong while fetching the data.", 'kachifo');
+        typingBubble.remove(); // Ensure typing bubble is removed
         eventSource.close();
     };
 }
