@@ -231,7 +231,7 @@ def stream_with_loading_messages(query):
 def generate_conversational_response(user_input):
     # Replace with your Hugging Face API call to BlenderBot
     inference_client = InferenceClient(model="facebook/blenderbot-400M-distill")  # Adjust based on your model
-    response = inference_client.chat(user_input)  # Call the chat method to get a response
+    response = inference_client.chat_completion(user_input)  # Call the chat method to get a response
     return response['generated_text']  # Adjust according to the response format
 
 # Routes
