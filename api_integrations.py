@@ -146,12 +146,20 @@ def generate_conversational_response(user_input: str) -> str:
     """Generate a conversational response using BlenderBot."""
     try:
         logger.info(f"Generating conversational response for input: {user_input[:100]}...")
-        response = inference_bot.chat(user_input)
-        return response['generated_text']  # Adjust according to the response format
+
+        # Construct the input for the chat model
+        messages = [{"role": "user", "content": user_input}]
+        
+        # Call the chat completion method on the inference client
+        response = inference_bot.chat_completion(messages=messages)  # Correct usage
+
+        # Extract and return the generated text from the response
+        generated_response = response['choices'][0]['message']['content']
+        return generated_response
     except Exception as e:
         logger.error(f"Error generating conversational response: {str(e)}")
         return "I'm sorry, I couldn't respond to that."
-
+        
 # Fetch trending topics (combined from multiple sources)
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
