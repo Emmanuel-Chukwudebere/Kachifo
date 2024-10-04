@@ -83,37 +83,60 @@ async function sendMessage(message) {
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
 
-    const typingBubble = createChatBubble('', 'kachifo', true);
+    const typingBubble = createChatBubble('', 'kachifo', true); // Show loading GIF
 
-    // Create a new EventSource for streaming responses
-    const eventSource = new EventSource(`/interact`);
+    // Sending a POST request for the user input
+    try {
+        const response = await fetch('/interact', {
+            method: 'POST',  // Use POST for sending user input
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ input: message }),  // Send the user input as JSON
+        });
 
-    eventSource.onopen = function() {
-        console.log("Connection to server opened.");
-    };
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        typingBubble.remove(); // Remove loading GIF if we get a response
+
+        // Handle the response
+        if (data.response) {
+            createChatBubble(data.response, 'kachifo');
+        } else {
+            createChatBubble("I'm sorry, but I encountered an issue while searching. Could you try rephrasing your query or asking about something else?", 'kachifo');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        typingBubble.remove(); // Remove loading GIF on error
+        createChatBubble("I'm sorry, but something went wrong on my end. Could we try that again?", 'kachifo');
+    }
+}
+
+// Function to handle streaming responses
+function startStreaming(message) {
+    const eventSource = new EventSource(`/interact?input=${encodeURIComponent(message)}`);
 
     eventSource.onmessage = function(event) {
         const data = JSON.parse(event.data);
-
         if (data.error) {
-            typingBubble.remove();
             createChatBubble(data.error, 'kachifo');
             eventSource.close();
         } else if (data.results) {
-            typingBubble.remove();
+            // Remove loading GIF here as well
+            typingBubble.remove(); // Ensure typing bubble is removed before displaying results
             const combinedResponse = data.results.map(item => 
                 `${item.title}: ${item.summary} <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more</a>`
             ).join('\n\n');
-
             createChatBubble(combinedResponse, 'kachifo');
-            eventSource.close();
         }
     };
 
     eventSource.onerror = function(error) {
         console.error("EventSource failed:", error);
-        typingBubble.remove();
-        createChatBubble("I'm sorry, but something went wrong on my end. Could we try that again?", 'kachifo');
+        createChatBubble("I'm sorry, but something went wrong while fetching the data.", 'kachifo');
         eventSource.close();
     };
 }
