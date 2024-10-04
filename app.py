@@ -12,7 +12,7 @@ from flask_talisman import Talisman
 from functools import wraps
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.exceptions import HTTPException, BadRequest
-from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf, generate_general_summary
+from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf, generate_general_summary, 
 from logging.handlers import RotatingFileHandler
 from huggingface_hub import InferenceClient  # Import for Hugging Face API interaction
 
@@ -175,17 +175,22 @@ def generate_conversational_response(user_input: str) -> str:
     try:
         logger.info(f"Generating conversational response for input: {user_input[:100]}...")
 
-        # Apply truncation if the input is too long
-        response = inference_bot.text_generation(user_input, parameters={"truncation": "only_first"})  # Truncate long inputs
+        # Debugging: Check if inference_bot is initialized
+        if not inference_bot:
+            raise ValueError("inference_bot is not initialized")
+
+        # Call the Hugging Face API
+        response = inference_bot.text_generation(user_input, parameters={"truncation": "only_first"})
 
         # Extract the generated text from the response
         generated_response = response.get('generated_text', "No response available")
         logger.info(f"Conversational response generated: {generated_response[:100]}...")
         return generated_response
+
     except Exception as e:
         logger.error(f"Error generating conversational response: {str(e)}")
         return "I'm sorry, I couldn't respond to that."
-
+        
 def stream_with_loading_messages(query):
     """Stream loading messages and final API results."""
     try:
