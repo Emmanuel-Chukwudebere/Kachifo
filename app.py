@@ -12,7 +12,7 @@ from flask_talisman import Talisman
 from functools import wraps
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.exceptions import HTTPException, BadRequest
-from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf, generate_general_summary, 
+from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf, generate_general_summary, generate_conversational_response 
 from logging.handlers import RotatingFileHandler
 from huggingface_hub import InferenceClient  # Import for Hugging Face API interaction
 
