@@ -157,9 +157,7 @@ def classify_input_type(user_input):
         return 'query'
     else:
         return 'conversation'
-
-# Global variable to store results
-results = []
+        
 
 def fetch_results(query):
     """Fetch results asynchronously and update the global variable 'results'."""
@@ -192,23 +190,25 @@ def generate_conversational_response(user_input: str) -> str:
         return "I'm sorry, I couldn't respond to that."
         
 def stream_with_loading_messages(query):
-    """Stream loading messages and final API results."""
-    try:
-        fetch_thread = threading.Thread(target=fetch_results, args=(query,))
-        fetch_thread.start()
+    """Stream loading messages and final API results using threading."""
+    global results
+    results = []
+    
+    fetch_thread = threading.Thread(target=fetch_results, args=(query,))
+    fetch_thread.start()
 
-        # Stream loading messages while fetching results in the background
+    try:
+        # Stream loading messages while the thread is still alive
         while fetch_thread.is_alive():
             yield f"data: {random.choice(loading_messages)}\n\n"
             time.sleep(2)
 
-        fetch_thread.join()  # Ensure all results are fetched
+        fetch_thread.join()  # Wait for the thread to finish
 
         # If results were fetched, stream them
         if results:
             summaries = []
             individual_summaries = []
-
             for result in results:
                 title = result.get('title', '')
                 summary = result.get('summary', '')
@@ -241,10 +241,11 @@ def stream_with_loading_messages(query):
             yield f"data: {json.dumps(final_response)}\n\n"
             logger.info(f"Streaming completed for '{query}'")
         else:
-            yield f"data: {{'error': 'No results found.'}}\n\n"
+            yield "data: {'error': 'No results found.'}\n\n"
+
     except Exception as e:
         logger.error(f"Error while processing search: {str(e)}", exc_info=True)
-        yield f"data: {{'error': 'An unexpected error occurred. Please try again later.'}}\n\n"
+        yield "data: {'error': 'An unexpected error occurred.'}\n\n"
 
 
 # Routes
