@@ -229,10 +229,22 @@ def stream_with_loading_messages(query):
 
 # Generate conversational response using BlenderBot
 def generate_conversational_response(user_input):
-    # Replace with your Hugging Face API call to BlenderBot
-    inference_client = InferenceClient(model="facebook/blenderbot-400M-distill")  # Adjust based on your model
-    response = inference_client.chat_completion(user_input)  # Call the chat method to get a response
-    return response['generated_text']  # Adjust according to the response format
+    # Initialize the inference client for the chat model
+    inference_client = InferenceClient(model="facebook/blenderbot-400M-distill", token=os.getenv('HUGGINGFACE_API_KEY'))
+
+    try:
+        # Construct the input for chat completion
+        messages = [{"role": "user", "content": user_input}]
+        
+        # Call chat_completion to get a response
+        response = inference_client.chat_completion(messages=messages)  # Correct usage
+        
+        # Extract the generated text from the response
+        generated_response = response['choices'][0]['message']['content']
+        return generated_response
+    except Exception as e:
+        logger.error(f"Error generating conversational response: {str(e)}")
+        return "I'm sorry, I couldn't respond to that."
 
 # Routes
 @app.route('/')
