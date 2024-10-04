@@ -88,6 +88,20 @@ def retry_with_backoff(exceptions, tries=3, delay=2, backoff=2):
         return wrapper
     return decorator
 
+# General summary from individual summaries
+def generate_general_summary(individual_summaries: List[str]) -> str:
+    """Generates a general summary using Hugging Face Hub API from individual summaries."""
+    combined_text = " ".join(individual_summaries)  # Combine all individual summaries into one text
+
+    try:
+        logger.info("Calling Hugging Face Summarization API for general summary")
+        response = inference_summary.summarization(combined_text, parameters={"max_length": 200, "min_length": 100, "do_sample": False})
+        general_summary = response.get('summary_text', "No summary available")
+        return general_summary
+    except Exception as e:
+        logger.error(f"Error generating general summary: {str(e)}")
+        return "Sorry, I couldn't generate a summary at the moment."
+
 @rate_limited(max_per_second=1.0)  # Customize based on API rate limits
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def summarize_with_hf(text: str) -> str:
