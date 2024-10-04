@@ -221,10 +221,17 @@ def home():
     return render_template('index.html', message="Welcome to Kachifo - Discover trends")
 
 # Route for interacting with the model
-@app.route('/interact', methods=['POST'])
+@app.route('/interact', methods=['GET', 'POST'])
 def interact():
-    user_input = request.json.get('input')
-    
+    if request.method == 'POST':
+        user_input = request.json.get('input')
+    else:
+        # For GET requests, you may want to retrieve the input from query parameters
+        user_input = request.args.get('input')
+
+    if not user_input:
+        return jsonify({'error': 'No input provided.'}), 400  # Return error if no input is given
+
     # Determine if input is conversational or query-related
     input_type = classify_input_type(user_input)
     
@@ -234,7 +241,9 @@ def interact():
     elif input_type == 'query':
         # Use streaming with loading messages for data fetching
         return Response(stream_with_context(stream_with_loading_messages(user_input)), content_type='text/event-stream')
-    
+    else:
+        return jsonify({'error': 'Invalid input type.'}), 400  # Handle invalid input type
+
     return jsonify({'response': response})
 
 # Routes for searching trends with streaming response
