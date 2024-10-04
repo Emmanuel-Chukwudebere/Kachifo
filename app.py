@@ -214,6 +214,12 @@ def generate_conversational_response(user_input):
     response = inference_client.chat(user_input)  # Call the chat method to get a response
     return response['generated_text']  # Adjust according to the response format
 
+# Routes
+@app.route('/')
+def home():
+    logger.info("Home page accessed")
+    return render_template('index.html', message="Welcome to Kachifo - Discover trends")
+
 # Route for interacting with the model
 @app.route('/interact', methods=['POST'])
 def interact():
