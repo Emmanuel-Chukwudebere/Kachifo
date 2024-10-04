@@ -40,38 +40,39 @@ function startStreaming(message, typingBubble) {
     const eventSource = new EventSource(`/interact?input=${encodeURIComponent(message)}`);
     let isFirstMessage = true;
 
-    eventSource.onmessage = function(event) {
+    eventSource.onmessage = function (event) {
         const data = JSON.parse(event.data);
+
         if (data.error) {
             typingBubble.innerHTML = `<p class="error-message">${data.error}</p>`;
             eventSource.close();
         } else if (data.results) {
-            const combinedResponse = data.results.map(item => 
+            const combinedResponse = data.results.map(item =>
                 `<div class="result-item">
                     <h3>${item.title}</h3>
                     <p>${item.summary}</p>
                     <a href="${item.url}" target="_blank" rel="noopener noreferrer">Read more</a>
                  </div>`
             ).join('');
-            typingBubble.innerHTML = combinedResponse;
+            typingBubble.innerHTML = combinedResponse; // Updating the same bubble
             eventSource.close();
         } else {
             if (isFirstMessage) {
-                typingBubble.innerHTML = ''; // Clear loading gif
+                typingBubble.innerHTML = ''; // Clear loading gif on first response
                 isFirstMessage = false;
             }
             const messageElement = document.createElement('p');
             messageElement.textContent = data;
             messageElement.style.opacity = '0';
             typingBubble.appendChild(messageElement);
-            
-            // Fade in new message
+
+            // Fade in effect
             setTimeout(() => {
                 messageElement.style.transition = 'opacity 0.5s ease-in';
                 messageElement.style.opacity = '1';
             }, 10);
 
-            // Fade out old message (if exists)
+            // Remove older messages if multiple bubbles are being shown
             if (typingBubble.childNodes.length > 1) {
                 const oldMessage = typingBubble.childNodes[0];
                 oldMessage.style.transition = 'opacity 0.5s ease-out';
@@ -82,7 +83,7 @@ function startStreaming(message, typingBubble) {
         scrollToBottom();
     };
 
-    eventSource.onerror = function(error) {
+    eventSource.onerror = function (error) {
         console.error("EventSource failed:", error);
         typingBubble.innerHTML = "<p class='error-message'>I'm sorry, but something went wrong while fetching the data.</p>";
         eventSource.close();
@@ -99,7 +100,7 @@ function createChatBubble(message, sender, isTyping = false) {
         const logoImg = document.createElement('img');
         logoImg.src = kachifoLogoPath;
         logoImg.alt = 'Kachifo Logo';
-        logoImg.classList.add('kachifo-logo');
+        logoImg.classList.add('kachifo-logo-small');
         bubble.appendChild(logoImg);
     }
 
