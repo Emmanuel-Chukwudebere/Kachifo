@@ -102,55 +102,61 @@ def generate_general_summary(individual_summaries: List[str]) -> str:
         logger.error(f"Error generating general summary: {str(e)}")
         return "Sorry, I couldn't generate a summary at the moment."
 
-@rate_limited(max_per_second=1.0)  # Customize based on API rate limits
+# Update the summarize_with_hf function
+@rate_limited(max_per_second=1.0)
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def summarize_with_hf(text: str) -> str:
     """Summarizes text using Hugging Face Hub API with caching and logging."""
     if text in summary_cache:
-        logger.info(f"Cache hit for summarization: {text[:100]}...")  # Log part of the input for clarity
+        logger.info(f"Cache hit for summarization: {text[:100]}...")
         return summary_cache[text]
-
     try:
-        logger.info(f"Calling Hugging Face Summarization API for text: {text[:100]}...")  # Log partial input text
-        response = inference_summary.summarization(text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
+        logger.info(f"Calling Hugging Face Summarization API for text: {text[:100]}...")
+        # Truncate the input if it's too long
+        max_input_length = 1024  # Adjust this value based on your model's requirements
+        truncated_text = text[:max_input_length]
+        response = inference_summary.summarization(truncated_text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
         summary = response.get('summary_text', "No summary available")
-        logger.info(f"Summary generated: {summary[:100]}...")  # Log part of the output for clarity
+        logger.info(f"Summary generated: {summary[:100]}...")
         summary_cache[text] = summary
         return summary
     except Exception as e:
         logger.error(f"Error calling Hugging Face Summarization API: {str(e)}")
         return "Sorry, summarization is unavailable at the moment."
 
-@rate_limited(max_per_second=1.0)  # Customize based on API rate limits
+# Update the extract_entities_with_hf function
+@rate_limited(max_per_second=1.0)
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
     """Extracts named entities using Hugging Face Hub API with caching and logging."""
     if text in entity_cache:
-        logger.info(f"Cache hit for NER: {text[:100]}...")  # Log part of the input for clarity
+        logger.info(f"Cache hit for NER: {text[:100]}...")
         return entity_cache[text]
-
     try:
-        logger.info(f"Calling Hugging Face NER API for text: {text[:100]}...")  # Log partial input text
-        response = inference_ner.token_classification(text)
+        logger.info(f"Calling Hugging Face NER API for text: {text[:100]}...")
+        # Truncate the input if it's too long
+        max_input_length = 512  # Adjust this value based on your model's requirements
+        truncated_text = text[:max_input_length]
+        response = inference_ner.token_classification(truncated_text)
         entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
-        logger.info(f"Entities extracted: {entities}")  # Log the extracted entities
+        logger.info(f"Entities extracted: {entities}")
         entity_cache[text] = {"entities": entities}
         return {"entities": entities}
     except Exception as e:
         logger.error(f"Error calling Hugging Face NER API: {str(e)}")
         return {"entities": []}
 
+# Update the generate_conversational_response function
 @rate_limited(max_per_second=1.0)
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def generate_conversational_response(user_input: str) -> str:
     """Generate a conversational response using BlenderBot."""
     try:
         logger.info(f"Generating conversational response for input: {user_input[:100]}...")
-
-        # Apply truncation if the input is too long
-        response = inference_bot.text_generation(user_input, parameters={"truncation": "only_first"})  # Truncate the input if it's too long
-
-        # Extract the generated text from the response
+        # Truncate the input if it's too long
+        max_input_length = 1024  # Adjust this value based on your model's requirements
+        truncated_input = user_input[:max_input_length]
+        response = inference_bot.text_generation(truncated_input, parameters={"max_length": 150, "min_length": 50, "do_sample": True, "temperature": 0.7})
         generated_response = response.get('generated_text', "No response available")
         logger.info(f"Conversational response generated: {generated_response[:100]}...")
         return generated_response
