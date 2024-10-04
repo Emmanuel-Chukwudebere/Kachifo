@@ -3,6 +3,7 @@ import logging
 import json
 import re
 import random
+import threading
 import time  # For simulating delays in the streaming example
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context, make_response
 from flask_sqlalchemy import SQLAlchemy
@@ -158,53 +159,72 @@ def classify_input_type(user_input):
         return 'conversation'
 
 # Streaming generator function to yield results in real-time
-def stream_with_loading_messages(query):
+# Global variable to store results
+results = []
+
+# Function to fetch results in a separate thread
+def fetch_results(query):
+    global results
     try:
-        # Sending loading messages
-        for _ in range(10):  # Adjust the number of loading messages as needed
+        results = fetch_trending_topics(query)  # Replace with actual fetching logic
+    except Exception as e:
+        app.logger.error(f"Error fetching results: {str(e)}")
+        results = []  # Indicate failure
+
+# Streaming generator function to yield results in real-time
+def stream_with_loading_messages(query):
+    global results
+
+    try:
+        fetch_thread = threading.Thread(target=fetch_results, args=(query,))
+        fetch_thread.start()
+
+        while fetch_thread.is_alive():
             yield f"data: {random.choice(loading_messages)}\n\n"
-            time.sleep(2)  # Wait before sending the next loading message
-        
-        # Now fetch the results after the loading messages
-        results = fetch_trending_topics(query)  # Replace with the actual query passed by the user
+            time.sleep(2)
+
+        fetch_thread.join()
+
+        if not results:
+            yield f"data: {{'error': 'No results found or an error occurred.'}}\n\n"
+            return
+
         summaries = []
-        individual_summaries = []  # For storing individual summaries
-        
+        individual_summaries = []
+
         for result in results:
-            summary = summarize_with_hf(f"{result.get('title', '')} {result.get('summary', '')}")
-            individual_summaries.append(summary)
+            title = result.get('title', '')
+            summary = result.get('summary', '')
+            full_summary = summarize_with_hf(f"{title} {summary}")
+            individual_summaries.append(full_summary)
             summaries.append({
                 'source': result.get('source', ''),
-                'title': result.get('title', ''),
-                'summary': summary,
+                'title': title,
+                'summary': full_summary,
                 'url': result.get('url', '')
             })
-        
-        # Generate a general summary from all individual summaries
+
         general_summary = generate_general_summary(individual_summaries)
-        
-        # Construct the prompt for BlenderBot
+
         bot_prompt = (
             f"User asked about trends in {query}. Here are the results:\n\n"
             f"General Summary: {general_summary}\n\n"
             f"Individual Results:\n" + "\n".join([f"- {s['title']}: {s['summary']}" for s in summaries])
         )
 
-        # Get a conversational response from BlenderBot
         conversational_response = generate_conversational_response(bot_prompt)
-        
+
         final_response = {
             'query': query,
             'results': summaries,
             'general_summary': general_summary,
-            'dynamic_response': conversational_response  # Updated to use BlenderBot's response
+            'dynamic_response': conversational_response
         }
-        
-        # Send final combined result
+
         yield f"data: {json.dumps(final_response)}\n\n"
-        logger.info(f"Streaming completed for '{query}'")
+        app.logger.info(f"Streaming completed for '{query}'")
     except Exception as e:
-        logger.error(f"Error while processing search: {str(e)}", exc_info=True)
+        app.logger.error(f"Error while processing search: {str(e)}", exc_info=True)
         yield f"data: {{'error': 'An unexpected error occurred. Please try again later.'}}\n\n"
 
 # Generate conversational response using BlenderBot
