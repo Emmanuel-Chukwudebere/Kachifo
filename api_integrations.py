@@ -10,9 +10,8 @@ from typing import List, Dict, Any
 from huggingface_hub import InferenceClient
 import praw
 import json
-from functools import wraps
-import re
 from requests_oauthlib import OAuth1
+import re
 
 # Load environment variables
 load_dotenv()
@@ -37,18 +36,18 @@ REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_SECRET = os.getenv("REDDIT_SECRET")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 
-# API keys and URLs
+# Hugging Face API keys and models
 HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"  # Summarization model
 HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"  # NER model
+HF_API_BOT_MODEL = "facebook/blenderbot-400M-distill"  # BlenderBot model
 
-# Initialize the InferenceClient for summarization
-inference_summary = InferenceClient(model="facebook/bart-large-cnn", token=os.getenv('HUGGINGFACE_API_KEY'))
+# Initialize the InferenceClient for summarization, NER, and BlenderBot
+inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
+inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
+inference_bot = InferenceClient(model=HF_API_BOT_MODEL, token=HF_API_KEY)
 
-# Initialize the InferenceClient for NER
-inference_ner = InferenceClient(model="dbmdz/bert-large-cased-finetuned-conll03-english", token=os.getenv('HUGGINGFACE_API_KEY'))
-
-# Cache setup: 1-hour time-to-live, max 1000 items
+# Cache setup for summaries and entities
 summary_cache = TTLCache(maxsize=1000, ttl=3600)
 entity_cache = TTLCache(maxsize=1000, ttl=3600)
 
@@ -93,7 +92,6 @@ def retry_with_backoff(exceptions, tries=3, delay=2, backoff=2):
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def summarize_with_hf(text: str) -> str:
     """Summarizes text using Hugging Face Hub API with caching and logging."""
-    # Check if summarization result is already cached
     if text in summary_cache:
         logger.info(f"Cache hit for summarization: {text[:100]}...")  # Log part of the input for clarity
         return summary_cache[text]
@@ -102,11 +100,7 @@ def summarize_with_hf(text: str) -> str:
         logger.info(f"Calling Hugging Face Summarization API for text: {text[:100]}...")  # Log partial input text
         response = inference_summary.summarization(text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
         summary = response.get('summary_text', "No summary available")
-
-        # Log the result of the summarization
         logger.info(f"Summary generated: {summary[:100]}...")  # Log part of the output for clarity
-
-        # Cache the result
         summary_cache[text] = summary
         return summary
     except Exception as e:
@@ -125,16 +119,24 @@ def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
         logger.info(f"Calling Hugging Face NER API for text: {text[:100]}...")  # Log partial input text
         response = inference_ner.token_classification(text)
         entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
-
-        # Log the result of the NER call
         logger.info(f"Entities extracted: {entities}")  # Log the extracted entities
-
-        # Cache the result
         entity_cache[text] = {"entities": entities}
         return {"entities": entities}
     except Exception as e:
         logger.error(f"Error calling Hugging Face NER API: {str(e)}")
         return {"entities": []}
+
+@rate_limited(max_per_second=1.0)  # Customize based on API rate limits
+@retry_with_backoff((RequestException, Timeout), tries=3)
+def generate_conversational_response(user_input: str) -> str:
+    """Generate a conversational response using BlenderBot."""
+    try:
+        logger.info(f"Generating conversational response for input: {user_input[:100]}...")
+        response = inference_bot.chat(user_input)
+        return response['generated_text']  # Adjust according to the response format
+    except Exception as e:
+        logger.error(f"Error generating conversational response: {str(e)}")
+        return "I'm sorry, I couldn't respond to that."
 
 # Fetch trending topics (combined from multiple sources)
 @retry_with_backoff((RequestException, Timeout), tries=3)
@@ -142,32 +144,16 @@ def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
     """Fetch all trends (YouTube, News, Google, Twitter, Reddit) for the given query."""
     trends = []
     try:
-        # Call multiple external APIs to fetch trends (e.g., YouTube, Google, Twitter)
         trends.extend(fetch_youtube_trends(query))
         trends.extend(fetch_news_trends(query))
         trends.extend(fetch_google_trends(query))
         trends.extend(fetch_twitter_trends(query))
         trends.extend(fetch_reddit_trends(query))
-
         logger.info(f"Fetched total {len(trends)} trends from all sources.")
         return trends
     except Exception as e:
         logger.error(f"Error fetching trends: {str(e)}")
         return []
-        
-# General summary from individual summaries
-def generate_general_summary(individual_summaries: List[str]) -> str:
-    """Generates a general summary using Hugging Face Hub API from individual summaries."""
-    combined_text = " ".join(individual_summaries)  # Combine all individual summaries into one text
-
-    try:
-        logger.info("Calling Hugging Face Summarization API for general summary")
-        response = inference_summary.summarization(combined_text, parameters={"max_length": 200, "min_length": 100, "do_sample": False})
-        general_summary = response.get('summary_text', "No summary available")
-        return general_summary
-    except Exception as e:
-        logger.error(f"Error generating general summary: {str(e)}")
-        return "Sorry, I couldn't generate a summary at the moment."
 
 # Fetch YouTube trends (Limited to 3 results)
 @rate_limited(1.0)
@@ -180,8 +166,8 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
-
         results = []
+        
         for item in data.get('items', []):
             title = item['snippet']['title']
             description = item['snippet']['description']
@@ -213,8 +199,8 @@ def fetch_news_trends(query: str) -> List[Dict[str, Any]]:
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
-
         results = []
+
         for article in data['articles']:
             title = article['title']
             content = article['content'] or article['description']
@@ -246,8 +232,8 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         data = response.json()
-
         results = []
+
         for item in data.get('items', []):
             title = item['title']
             snippet = item['snippet']
@@ -275,10 +261,8 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending tweets matching the query."""
     try:
         logger.info(f"Fetching Twitter trends for query: {query}")
-        # Twitter uses OAuth1 authentication
         auth = OAuth1(TWITTER_API_KEY, TWITTER_API_SECRET_KEY, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET)
         search_url = f"https://api.twitter.com/1.1/search/tweets.json?q={query}&result_type=popular&count=3"
-        
         response = requests.get(search_url, auth=auth, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -303,26 +287,26 @@ def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
     except RequestException as e:
         logger.error(f"Error fetching Twitter trends: {str(e)}")
         return []
-        
+
 # Initialize Reddit API with PRAW
 reddit = praw.Reddit(
     client_id=REDDIT_CLIENT_ID,
     client_secret=REDDIT_SECRET,
     user_agent=REDDIT_USER_AGENT
 )
-        
+
 @rate_limited(1.0)  # Limiting to 1 request per second
 @retry_with_backoff((RequestException, Timeout), tries=3)
 def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
     """Fetch trending Reddit posts matching the query."""
     try:
         logger.info(f"Fetching Reddit trends for query: {query}")
-        # Search for the query on Reddit
         results = []
+
         for submission in reddit.subreddit("all").search(query, sort="top", limit=3):
             post_title = submission.title
             post_url = submission.url
-            post_content = submission.selftext[:500]  # Reddit posts can be long, truncate if necessary
+            post_content = submission.selftext[:500]  # Truncate if necessary
             summary = summarize_with_hf(post_content)
 
             if post_title and summary and post_url:
@@ -335,10 +319,9 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
 
         logger.info(f"Fetched {len(results)} Reddit trends.")
         return results
-    except RequestException as e:
+    except Exception as e:
         logger.error(f"Error fetching Reddit trends: {str(e)}")
         return []
-        
 
 # Entry point for the script
 if __name__ == "__main__":
