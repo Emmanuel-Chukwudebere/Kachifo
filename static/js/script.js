@@ -160,23 +160,24 @@ function isDesktop() {
     return window.innerWidth >= 1024;
 }
 
-// Attach event listeners for suggestions dynamically
+// Function to attach event listeners for suggestions dynamically
 function attachSuggestionListeners() {
-    const suggestionElements = document.querySelectorAll('.suggestion');
-    
-    suggestionElements.forEach(suggestion => {
-        suggestion.removeEventListener('click', handleSuggestionClick); // Prevent duplicate listeners
-        suggestion.addEventListener('click', handleSuggestionClick);
-    });
+  const suggestionElements = document.querySelectorAll('.suggestion'); // Select elements
+  suggestionElements.forEach(suggestion => {
+    suggestion.addEventListener('click', handleSuggestionClick); // Add event listener
+  });
 }
-
 // Function to handle suggestion click
 function handleSuggestionClick(event) {
-    const suggestionText = event.target.textContent.trim();
-    if (suggestionText) {
-        sendMessage(suggestionText); // Send the suggestion as a message
-    }
+  const suggestionText = event.target.textContent.trim(); // Get the suggestion text
+  if (suggestionText) {
+    sendMessage(suggestionText); // Send the suggestion text to the chat window
+  }
 }
+// Attach event listeners on page load
+document.addEventListener('DOMContentLoaded', () => {
+  attachSuggestionListeners();
+});
 
 // Event listener for the send button
 sendBtn.addEventListener('click', () => {
