@@ -214,7 +214,7 @@ def home():
 # Routes
 @app.route('/interact', methods=['GET', 'POST'])
 @rate_limit
-def interact():
+async def interact():
     user_input = request.json.get('input') if request.method == 'POST' else request.args.get('input')
     
     if not user_input:
@@ -225,11 +225,10 @@ def interact():
     # Handle conversational input with BlenderBot
     if input_type == 'conversation':
         try:
-            # Run the async function synchronously
-            response_stream = asyncio.run(inference_client.chat_completion(
+            response_stream = await inference_client.chat_completion(  # Await the async function
                 messages=[{"role": "user", "content": user_input}],
                 stream=True
-            ))
+            )
             return Response(stream_with_context(stream_blender_response(response_stream)), content_type='text/event-stream')
         except Exception as e:
             logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
@@ -237,8 +236,7 @@ def interact():
     
     # Handle query-type input
     elif input_type == 'query':
-        result = asyncio.run(stream_with_loading_messages(user_input))  # Synchronous execution
-        return Response(stream_with_context(result), content_type='text/event-stream')
+        return Response(stream_with_context(stream_with_loading_messages(user_input)), content_type='text/event-stream')
 
     return jsonify({'error': 'Invalid input type.'}), 400
 
