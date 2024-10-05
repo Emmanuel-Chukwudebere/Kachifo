@@ -214,8 +214,9 @@ def home():
 # Routes
 @app.route('/interact', methods=['GET', 'POST'])
 @rate_limit
-async def interact():
+def interact():
     user_input = request.json.get('input') if request.method == 'POST' else request.args.get('input')
+    
     if not user_input:
         return jsonify({'error': 'No input provided.'}), 400
 
@@ -224,65 +225,85 @@ async def interact():
     # Handle conversational input with BlenderBot
     if input_type == 'conversation':
         try:
-            response_stream = inference_client.chat_completion(
+            # Run the async function synchronously
+            response_stream = asyncio.run(inference_client.chat_completion(
                 messages=[{"role": "user", "content": user_input}],
                 stream=True
-            )
-            return Response(await stream_with_context(stream_blender_response(response_stream)), content_type='text/event-stream')
+            ))
+            return Response(stream_with_context(stream_blender_response(response_stream)), content_type='text/event-stream')
         except Exception as e:
             logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
             return create_standard_response(None, 500, "An error occurred. Please try again later.")
     
     # Handle query-type input
     elif input_type == 'query':
-        return Response(await stream_with_context(stream_with_loading_messages(user_input)), content_type='text/event-stream')
+        result = asyncio.run(stream_with_loading_messages(user_input))  # Synchronous execution
+        return Response(stream_with_context(result), content_type='text/event-stream')
 
     return jsonify({'error': 'Invalid input type.'}), 400
 
+
 @app.route('/search', methods=['GET', 'POST'])
 @rate_limit
-async def search_trends():
+def search_trends():
     query = request.args.get('q') if request.method == 'GET' else request.json.get('q')
+    
     if not query:
         return create_standard_response({'error': 'Query parameter "q" is required'}, 400, "Query parameter missing")
+
     query = sanitize_input(query)
-    return Response(stream_with_context(stream_with_loading_messages(query)), content_type='text/event-stream')
+    
+    # Run async function synchronously
+    result = asyncio.run(stream_with_loading_messages(query))
+    
+    return Response(stream_with_context(result), content_type='text/event-stream')
+
 
 @app.route('/process-query', methods=['POST'])
 @rate_limit
-async def process_query():
+def process_query():
     try:
         query = request.json.get('q') if request.is_json else request.form.get('q')
+        
         if not query:
             logger.warning("Query is missing")
             return create_standard_response({'error': 'Query is required'}, 400, "Query is required")
+
         query = sanitize_input(query)
 
-        # Extract entities from query using Hugging Face API
-        processed_query_data = extract_entities_with_hf(query)
+        # Extract entities from query using Hugging Face API (run asynchronously)
+        processed_query_data = asyncio.run(extract_entities_with_hf(query))
 
         # Store the query in the database
         new_query = UserQuery(query=query)
         new_query.set_hf_data(processed_query_data)
         db.session.add(new_query)
         db.session.commit()
-        logger.info("Query stored in the database")
 
-        return Response(stream_with_context(stream_with_loading_messages(query)), content_type='text/event-stream')
+        # Run the streaming function asynchronously
+        result = asyncio.run(stream_with_loading_messages(query))
+
+        return Response(stream_with_context(result), content_type='text/event-stream')
+    
     except SQLAlchemyError as e:
         logger.error(f"Database error: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "A database error occurred. Please try again later.")
+    
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
+
 @app.route('/recent_searches', methods=['GET'])
 @rate_limit
-async def recent_searches():
+def recent_searches():
     try:
-        # Stream recent searches from the database (you can adjust this function)
-        recent_queries = await db.session.execute(db.select(UserQuery).order_by(UserQuery.timestamp.desc()).limit(10))
+        # Fetch recent searches from the database asynchronously
+        recent_queries = asyncio.run(fetch_recent_queries())
+
+        # Return the streamed recent searches
         return Response(stream_with_context((f"data: {q.query}\n\n" for q in recent_queries)), content_type='text/event-stream')
+    
     except Exception as e:
         logger.error(f"Error fetching recent searches: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
