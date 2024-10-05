@@ -245,13 +245,6 @@ async def search_trends():
 @rate_limit
 async def process_query():
     try:
-        queryIt seems the last part of the code was cut off. I'll complete it below, making sure **asynchronous operations** are used throughout, including for fetching, processing, and streaming. Here is the continuation and finalization of the updated **`app.py`**:
-
-```python
-@app.route('/process-query', methods=['POST'])
-@rate_limit
-async def process_query():
-    try:
         query = request.json.get('q') if request.is_json else request.form.get('q')
         if not query:
             logger.warning("Query is missing")
