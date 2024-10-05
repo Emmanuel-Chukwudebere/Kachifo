@@ -150,6 +150,7 @@ function resetChat() {
     initialView.classList.remove('hidden');
     suggestions.classList.remove('hidden');
     chatWindow.classList.remove('active');
+    userInput.value = '';  // Clear input after reset
     scrollToBottom();
     attachSuggestionListeners();  // Reattach listeners after reset
 }
@@ -161,11 +162,20 @@ function isDesktop() {
 
 // Attach event listeners for suggestions dynamically
 function attachSuggestionListeners() {
-    document.querySelectorAll('.suggestion').forEach(suggestion => {
-        suggestion.addEventListener('click', () => {
-            sendMessage(suggestion.textContent);
-        });
+    const suggestionElements = document.querySelectorAll('.suggestion');
+    
+    suggestionElements.forEach(suggestion => {
+        suggestion.removeEventListener('click', handleSuggestionClick); // Prevent duplicate listeners
+        suggestion.addEventListener('click', handleSuggestionClick);
     });
+}
+
+// Function to handle suggestion click
+function handleSuggestionClick(event) {
+    const suggestionText = event.target.textContent.trim();
+    if (suggestionText) {
+        sendMessage(suggestionText); // Send the suggestion as a message
+    }
 }
 
 // Event listener for the send button
@@ -181,8 +191,8 @@ sendBtn.addEventListener('click', () => {
 // Event listener for pressing "Enter" key in the input field (only for desktop)
 userInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && isDesktop()) {
-        e.preventDefault();
-        sendMessage();
+        e.preventDefault();  // Prevent default Enter behavior (newline)
+        sendMessage();       // Send the message instead
     }
 });
 
