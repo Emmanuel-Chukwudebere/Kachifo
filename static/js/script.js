@@ -201,7 +201,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Event listener for the send button
-sendBtn.addEventListener('click', () => {
+sendBtn.addEventListener('click', (e) => {
+    e.preventDefault(); // Prevent any default action
     console.log("Send button clicked");
     gtag('event', 'click', {
         'event_category': 'Button',
@@ -234,7 +235,11 @@ userInput.addEventListener('input', debounce(function() {
 }, 100));
 
 // Event listener for the New Chat icon
-newChatIcon.addEventListener('click', resetChat);
+newChatIcon.addEventListener('click', (e) => {
+    e.preventDefault(); // Prevent any default action
+    console.log("Reset chat button clicked");
+    resetChat();
+});
 
 // Ensure listeners for dynamic suggestions are re-attached after DOM updates
 const observer = new MutationObserver(() => {
