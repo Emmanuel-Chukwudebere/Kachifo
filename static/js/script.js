@@ -202,15 +202,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Event listener for the send button
 sendBtn.addEventListener('click', (e) => {
-    e.preventDefault(); // Prevent any default action
-    console.log("Send button clicked");
-    gtag('event', 'click', {
-        'event_category': 'Button',
-        'event_label': 'Send Message',
-        'value': 1
-    });
-    sendMessage();
+    e.preventDefault();  // Prevent default form submission
+    console.log("Send button clicked!");  // Check if the button click is registered
+    sendMessage();  // Call your sendMessage function
 });
+
 
 // Event listener for pressing "Enter" key in the input field (only for desktop)
 userInput.addEventListener('keypress', (e) => {
