@@ -211,25 +211,32 @@ def home():
     logger.info("Home page accessed")
     return render_template('index.html', message="Welcome to Kachifo - Discover trends")
 
+# Routes
 @app.route('/interact', methods=['GET', 'POST'])
 @rate_limit
 async def interact():
     user_input = request.json.get('input') if request.method == 'POST' else request.args.get('input')
     if not user_input:
         return jsonify({'error': 'No input provided.'}), 400
+
     input_type = classify_input_type(user_input)
+    
+    # Handle conversational input with BlenderBot
     if input_type == 'conversation':
         try:
             response_stream = inference_client.chat_completion(
                 messages=[{"role": "user", "content": user_input}],
                 stream=True
             )
-            return Response(stream_with_context(stream_blender_response(response_stream)), content_type='text/event-stream')
+            return Response(await stream_with_context(stream_blender_response(response_stream)), content_type='text/event-stream')
         except Exception as e:
             logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
             return create_standard_response(None, 500, "An error occurred. Please try again later.")
+    
+    # Handle query-type input
     elif input_type == 'query':
-        return Response(stream_with_context(stream_with_loading_messages(user_input)), content_type='text/event-stream')
+        return Response(await stream_with_context(stream_with_loading_messages(user_input)), content_type='text/event-stream')
+
     return jsonify({'error': 'Invalid input type.'}), 400
 
 @app.route('/search', methods=['GET', 'POST'])

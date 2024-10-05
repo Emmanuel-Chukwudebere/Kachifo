@@ -151,6 +151,7 @@ function resetChat() {
     suggestions.classList.remove('hidden');
     chatWindow.classList.remove('active');
     scrollToBottom();
+    attachSuggestionListeners();  // Reattach listeners after reset
 }
 
 // Function to check if the user is on a desktop
