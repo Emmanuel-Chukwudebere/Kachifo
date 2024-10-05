@@ -1,4 +1,5 @@
 // JavaScript for chat interaction and handling API responses
+
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 const chatWindow = document.querySelector('.chat-window');
@@ -72,11 +73,11 @@ function startStreaming(message, typingBubble) {
                 </div>
             `).join('');
 
-            typingBubble.innerHTML = combinedResponse; // Update the single bubble with final result
+            typingBubble.innerHTML = combinedResponse;
             eventSource.close();
         } else {
             if (isFirstMessage) {
-                typingBubble.innerHTML = ''; // Clear the loading gif
+                typingBubble.innerHTML = '';
                 isFirstMessage = false;
             }
 
@@ -85,13 +86,11 @@ function startStreaming(message, typingBubble) {
             messageElement.style.opacity = '0';
             typingBubble.appendChild(messageElement);
 
-            // Fade-in effect for messages
             setTimeout(() => {
                 messageElement.style.transition = 'opacity 0.5s ease-in';
                 messageElement.style.opacity = '1';
             }, 10);
 
-            // Remove older messages
             if (typingBubble.childNodes.length > 1) {
                 const oldMessage = typingBubble.childNodes[0];
                 oldMessage.style.transition = 'opacity 0.5s ease-out';
@@ -118,7 +117,6 @@ async function sendMessage(message) {
 
     if (message === '') return;
 
-    // Clear chat window, reset input, and hide suggestions
     createChatBubble('user').innerHTML = formatMessageWithLinks(message);
     userInput.value = '';
     userInput.style.height = 'auto';
@@ -139,7 +137,6 @@ async function sendMessage(message) {
 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         
-        // Start streaming the response
         startStreaming(message, typingBubble);
     } catch (error) {
         console.error('Error:', error);
@@ -159,6 +156,15 @@ function resetChat() {
 // Function to check if the user is on a desktop
 function isDesktop() {
     return window.innerWidth >= 1024;
+}
+
+// Attach event listeners for suggestions dynamically
+function attachSuggestionListeners() {
+    document.querySelectorAll('.suggestion').forEach(suggestion => {
+        suggestion.addEventListener('click', () => {
+            sendMessage(suggestion.textContent);
+        });
+    });
 }
 
 // Event listener for the send button
@@ -192,15 +198,21 @@ userInput.addEventListener('input', debounce(function() {
     }
 }, 100));
 
-// Event listeners for suggestions
-document.querySelectorAll('.suggestion').forEach(suggestion => {
-    suggestion.addEventListener('click', () => {
-        sendMessage(suggestion.textContent);
-    });
-});
-
 // Event listener for the New Chat icon
 newChatIcon.addEventListener('click', resetChat);
+
+// Reattach suggestion event listeners on page load
+document.addEventListener('DOMContentLoaded', () => {
+    attachSuggestionListeners();
+});
+
+// Ensure listeners for dynamic suggestions are re-attached after DOM updates
+const observer = new MutationObserver(() => {
+    attachSuggestionListeners();
+});
+
+// Observe changes in the suggestions container
+observer.observe(suggestions, { childList: true });
 
 // Initial scroll to bottom on page load
 scrollToBottom();
@@ -208,14 +220,4 @@ scrollToBottom();
 // Error handling for unhandled promise rejections
 window.addEventListener('unhandledrejection', function(event) {
     console.error('Unhandled promise rejection:', event.reason);
-});
-
-// Initialize event listeners when the DOM is fully loaded
-document.addEventListener('DOMContentLoaded', () => {
-    // Re-attach event listeners for dynamic elements
-    document.querySelectorAll('.suggestion').forEach(suggestion => {
-        suggestion.addEventListener('click', () => {
-            sendMessage(suggestion.textContent);
-        });
-    });
 });
