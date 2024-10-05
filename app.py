@@ -225,10 +225,11 @@ async def interact():
     # Handle conversational input with BlenderBot
     if input_type == 'conversation':
         try:
-            response_stream = await inference_client.chat_completion(  # Await the async function
+            response_stream = await inference_client.chat_completion(
                 messages=[{"role": "user", "content": user_input}],
                 stream=True
             )
+            logger.info(f"Response stream created for BlenderBot: {response_stream}")
             return Response(stream_with_context(stream_blender_response(response_stream)), content_type='text/event-stream')
         except Exception as e:
             logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
@@ -236,7 +237,13 @@ async def interact():
     
     # Handle query-type input
     elif input_type == 'query':
-        return Response(stream_with_context(stream_with_loading_messages(user_input)), content_type='text/event-stream')
+        try:
+            # Log if the generator is being correctly handled
+            logger.info(f"Handling query: {user_input}")
+            return Response(stream_with_context(stream_with_loading_messages(user_input)), content_type='text/event-stream')
+        except Exception as e:
+            logger.error(f"Error streaming query: {str(e)}", exc_info=True)
+            return create_standard_response(None, 500, "An error occurred while processing your request.")
 
     return jsonify({'error': 'Invalid input type.'}), 400
 
