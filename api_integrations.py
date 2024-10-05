@@ -10,6 +10,8 @@ from typing import List, Dict, Any
 from huggingface_hub import InferenceClient
 import praw
 import json
+import time
+import re
 from requests_oauthlib import OAuth1
 
 # Load environment variables
