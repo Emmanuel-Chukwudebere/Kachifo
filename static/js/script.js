@@ -221,6 +221,19 @@ userInput.addEventListener('keypress', (e) => {
     }
 });
 
+// Debounce function
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 // Auto-resize input field and handle typing state
 userInput.addEventListener('input', debounce(function() {
     this.style.height = 'auto';
