@@ -211,6 +211,12 @@ def async_to_sync(f):
         return asyncio.get_event_loop().run_until_complete(f(*args, **kwargs))
     return wrapper
 
+# Routes
+@app.route('/')
+def home():
+    logger.info("Home page accessed")
+    return render_template('index.html', message="Welcome to Kachifo - Discover trends")
+
 @app.route('/interact', methods=['GET', 'POST'])
 @rate_limit
 def interact():
