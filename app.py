@@ -16,6 +16,9 @@ from werkzeug.exceptions import HTTPException, BadRequest
 from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf, generate_conversational_response
 from logging.handlers import RotatingFileHandler
 from huggingface_hub import InferenceClient
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from marshmallow import Schema, fields, validate
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -142,6 +145,40 @@ def rate_limit(func):
         return func(*args, **kwargs)
     return wrapper
 
+class InteractSchema(Schema):
+    input = fields.Str(required=True, validate=validate.Length(min=1, max=1000))
+
+class SearchSchema(Schema):
+    q = fields.Str(required=True, validate=validate.Length(min=1, max=200))
+
+class ProcessQuerySchema(Schema):
+    q = fields.Str(required=True, validate=validate.Length(min=1, max=200))
+
+def validate_request(schema_class):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            schema = schema_class()
+            if request.method == 'GET':
+                errors = schema.validate(request.args)
+            else:
+                if request.is_json:
+                    errors = schema.validate(request.json)
+                else:
+                    errors = schema.validate(request.form)
+            
+            if errors:
+                return create_standard_response({'errors': errors}, 400, "Invalid request parameters")
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+    default_limits=["100 per day", "30 per hour"]
+)
+
 # Input sanitization and classification
 def sanitize_input(query):
     sanitized = re.sub(r"[^\w\s]", "", query).strip()
@@ -194,7 +231,8 @@ def home():
     return render_template('index.html', message="Welcome to Kachifo - Discover trends")
 
 @app.route('/interact', methods=['GET', 'POST'])
-@rate_limit
+@limiter.limit("10 per minute")
+@validate_request(InteractSchema)
 def interact():
     user_input = request.json.get('input') if request.method == 'POST' else request.args.get('input')
     if not user_input:
@@ -202,110 +240,117 @@ def interact():
 
     input_type = classify_input_type(user_input)
 
-    # Handle conversational input with BlenderBot
-    if input_type == 'conversation':
-        try:
-            @async_to_sync
-            async def generate_blender_response():
-                response_started = asyncio.Event()
+    @async_to_sync
+    async def generate_response():
+        response_started = asyncio.Event()
 
-                # Function to yield loading messages
-                async def send_loading_messages():
-                    while not response_started.is_set():
-                        loading_message = random.choice(loading_messages)
-                        yield f"data: {loading_message}\n\n"
-                        await asyncio.sleep(2)  # Adjust the sleep time as needed
+        async def send_loading_messages():
+            while not response_started.is_set():
+                loading_message = random.choice(loading_messages)
+                yield f"data: {loading_message}\n\n"
+                await asyncio.sleep(2)
 
-                # Function to stream the BlenderBot response
-                async def stream_blender_response():
+        async def process_input():
+            try:
+                if input_type == 'conversation':
+                    response_stream = await inference_client.chat_completion(
+                        messages=[{"role": "user", "content": user_input}],
+                        stream=True
+                    )
+                    response_started.set()
+                    async for token in response_stream:
+                        yield f"data: {token['choices'][0]['delta']['content']}\n\n"
+                else:  # query
+                    trends = await fetch_trending_topics(user_input)
+                    summaries = []
+                    for trend in trends:
+                        summary = await summarize_with_hf(f"{trend['title']} {trend['summary']}")
+                        summaries.append({
+                            'source': trend['source'],
+                            'title': trend['title'],
+                            'summary': summary,
+                            'url': trend['url']
+                        })
+                    response_started.set()
+                    yield f"data: {json.dumps({'query': user_input, 'results': summaries})}\n\n"
+            except Exception as e:
+                response_started.set()
+                logger.error(f"Error processing input: {str(e)}", exc_info=True)
+                yield f"data: {{'error': 'An error occurred. Please try again later.'}}\n\n"
+
+        async def merged_stream():
+            loading_task = asyncio.create_task(send_loading_messages().__anext__())
+            process_task = asyncio.create_task(process_input().__anext__())
+            while True:
+                done, pending = await asyncio.wait(
+                    [loading_task, process_task],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if loading_task in done:
                     try:
-                        response_stream = await inference_client.chat_completion(
-                            messages=[{"role": "user", "content": user_input}],
-                            stream=True
-                        )
-                        response_started.set()  # Signal that response has started
-                        async for token in response_stream:
-                            yield f"data: {token['choices'][0]['delta']['content']}\n\n"
-                    except Exception as e:
-                        response_started.set()  # Ensure the loading messages stop
-                        logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
-                        yield f"data: {{'error': 'An error occurred. Please try again later.'}}\n\n"
+                        loading_message = loading_task.result()
+                        yield loading_message
+                        if not response_started.is_set():
+                            loading_task = asyncio.create_task(send_loading_messages().__anext__())
+                    except StopAsyncIteration:
+                        pass
+                if process_task in done:
+                    try:
+                        response_message = process_task.result()
+                        yield response_message
+                        process_task = asyncio.create_task(process_input().__anext__())
+                    except StopAsyncIteration:
+                        break
 
-                # Merge the loading messages and the BlenderBot response
-                async def merged_stream():
-                    loading_task = asyncio.create_task(send_loading_messages().__anext__())
-                    response_task = asyncio.create_task(stream_blender_response().__anext__())
+        return Response(stream_with_context(merged_stream()), content_type='text/event-stream')
 
-                    while True:
-                        done, pending = await asyncio.wait(
-                            [loading_task, response_task],
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-
-                        if loading_task in done:
-                            try:
-                                loading_message = loading_task.result()
-                                yield loading_message
-                                if not response_started.is_set():
-                                    loading_task = asyncio.create_task(send_loading_messages().__anext__())
-                            except StopAsyncIteration:
-                                pass  # No more loading messages
-
-                        if response_task in done:
-                            try:
-                                response_message = response_task.result()
-                                yield response_message
-                                response_task = asyncio.create_task(stream_blender_response().__anext__())
-                            except StopAsyncIteration:
-                                break  # Response fully streamed
-
-                return Response(stream_with_context(merged_stream()), content_type='text/event-stream')
-
-            return generate_blender_response()
-
-        except Exception as e:
-            logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
-            return create_standard_response(None, 500, "An error occurred. Please try again later.")
+    return generate_response()
 
 # Route to search trends
 @app.route('/search', methods=['GET', 'POST'])
-@rate_limit
+@limiter.limit("20 per minute")
+@validate_request(SearchSchema)
 def search_trends():
     query = request.args.get('q') if request.method == 'GET' else request.json.get('q')
     if not query:
         return create_standard_response({'error': 'Query parameter "q" is required'}, 400, "Query parameter missing")
-    
+
     query = sanitize_input(query)
 
     @async_to_sync
     async def generate_search_response():
-        results = await fetch_trending_topics(query)
-        if not results:
-            yield "data: {'error': 'No results found.'}\n\n"
-            return
-        
-        summaries = []
-        individual_summaries = []
-        for result in results:
-            title = result.get('title', '')
-            summary = result.get('summary', '')
-            full_summary = await summarize_with_hf(f"{title} {summary}")
-            individual_summaries.append(full_summary)
-            summaries.append({
-                'source': result.get('source', ''),
-                'title': title,
-                'summary': full_summary,
-                'url': result.get('url', '')
-            })
+        try:
+            results = await fetch_trending_topics(query)
+            if not results:
+                yield "data: {'error': 'No results found.'}\n\n"
+                return
 
-        general_summary = await generate_general_summary(individual_summaries)
-        final_response = {'query': query, 'results': summaries, 'general_summary': general_summary}
-        yield f"data: {json.dumps(final_response)}\n\n"
+            summaries = []
+            individual_summaries = []
+            for result in results:
+                title = result.get('title', '')
+                summary = result.get('summary', '')
+                full_summary = await summarize_with_hf(f"{title} {summary}")
+                individual_summaries.append(full_summary)
+                summaries.append({
+                    'source': result.get('source', ''),
+                    'title': title,
+                    'summary': full_summary,
+                    'url': result.get('url', '')
+                })
+
+            general_summary = await generate_general_summary(individual_summaries)
+            final_response = {'query': query, 'results': summaries, 'general_summary': general_summary}
+            yield f"data: {json.dumps(final_response)}\n\n"
+        except Exception as e:
+            logger.error(f"Error in search_trends: {str(e)}", exc_info=True)
+            yield f"data: {{'error': 'An unexpected error occurred. Please try again later.'}}\n\n"
 
     return Response(stream_with_context(generate_search_response()), content_type='text/event-stream')
 
 @app.route('/process-query', methods=['POST'])
-@rate_limit
+@limiter.limit("10 per minute")
+@validate_request(ProcessQuerySchema)
 def process_query():
     try:
         query = request.json.get('q') if request.is_json else request.form.get('q')
@@ -329,10 +374,30 @@ def process_query():
             # Function to process the query and stream the response
             async def process_and_respond():
                 try:
-                    # [Your existing code to process the query]
-                    # For example:
+                    processed_query_data = await extract_entities_with_hf(query)
+            
+                    # Store the query in the database
+                    new_query = UserQuery(query=query)
+                    new_query.set_hf_data(processed_query_data)
+                    db.session.add(new_query)
+                    db.session.commit()
+            
+                    # Generate trending topics
                     trends = await fetch_trending_topics(query)
-                    # ... Summarize and generate context ...
+            
+                    # Summarize trends
+                    summaries = []
+                    for trend in trends:
+                        title = trend.get('title', '')
+                        summary = trend.get('summary', '')
+                        full_summary = await summarize_with_hf(f"{title} {summary}")
+                        summaries.append(full_summary)
+            
+                    # Generate a general summary
+                    general_summary = await generate_general_summary(summaries)
+            
+                    # Prepare context for BlenderBot
+                    context = f"Query: {query}\nTrending topics: {general_summary}"
 
                     # Generate conversational response using BlenderBot
                     response_stream = await inference_client.chat_completion(
@@ -388,18 +453,24 @@ def process_query():
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
-
+        
 # Route to fetch recent searches
 @app.route('/recent_searches', methods=['GET'])
-@rate_limit
+@limiter.limit("30 per minute")
 def recent_searches():
     try:
         @async_to_sync
         async def fetch_recent_searches_async():
-            # Fetch recent searches from the database asynchronously
-            recent_queries = UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
-            for q in recent_queries:
-                yield f"data: {q.query}\n\n"
+            try:
+                recent_queries = UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
+                for q in recent_queries:
+                    yield f"data: {json.dumps({'query': q.query, 'timestamp': q.timestamp.isoformat()})}\n\n"
+            except SQLAlchemyError as e:
+                logger.error(f"Database error in recent_searches: {str(e)}", exc_info=True)
+                yield f"data: {{'error': 'A database error occurred. Please try again later.'}}\n\n"
+            except Exception as e:
+                logger.error(f"Unexpected error in recent_searches: {str(e)}", exc_info=True)
+                yield f"data: {{'error': 'An unexpected error occurred. Please try again later.'}}\n\n"
 
         return Response(stream_with_context(fetch_recent_searches_async()), content_type='text/event-stream')
     except Exception as e:
@@ -413,6 +484,11 @@ def handle_exception(e):
         return e
     logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
     return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
+
+# Error handler for rate limiting
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
 
 # Initialize the database
 if __name__ == '__main__':
