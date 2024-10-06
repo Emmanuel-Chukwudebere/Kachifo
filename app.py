@@ -31,8 +31,8 @@ Talisman(app, content_security_policy={
     'connect-src': ["'self'", 'https:']
 })
 
-# Database Configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///production.db')
+# Database Configuration for PostgreSQL on Render
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql+psycopg2://kachifodb_user:bmSBnUVP4UEFw6B5dYLgoCu3Xi3uDF4I@dpg-cs1bci3tq21c73envab0-a/kachifodb')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -65,7 +65,7 @@ def setup_logging():
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Model for storing trends and user queries
+# Define Models
 class Trend(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     query = db.Column(db.String(255), nullable=False)
