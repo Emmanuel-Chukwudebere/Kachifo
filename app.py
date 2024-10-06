@@ -134,6 +134,46 @@ loading_messages = [
     "Fun fact: The first ever online sale was made in 1994."
 ]
 
+class InteractSchema(Schema):
+    input = fields.Str(required=True, validate=validate.Length(min=1, max=1000))
+
+class SearchSchema(Schema):
+    q = fields.Str(required=True, validate=validate.Length(min=1, max=200))
+
+class ProcessQuerySchema(Schema):
+    q = fields.Str(required=True, validate=validate.Length(min=1, max=200))
+
+def validate_request(schema_class):
+    def decorator(f):
+        @wraps(f)
+        async def decorated_function(*args, **kwargs):
+            schema = schema_class()
+            errors = {}
+
+            # Validate based on request method
+            if request.method == 'GET':
+                try:
+                    schema.load(request.args)
+                except ValidationError as err:
+                    errors = err.messages
+            else:
+                if request.is_json:
+                    try:
+                        schema.load(await request.get_json())
+                    except ValidationError as err:
+                        errors = err.messages
+                else:
+                    try:
+                        schema.load(await request.form)
+                    except ValidationError as err:
+                        errors = err.messages
+            
+            if errors:
+                return create_standard_response({'errors': errors}, 400, "Invalid request parameters")
+            return await f(*args, **kwargs)  # Ensure the function is awaited
+        return decorated_function
+    return decorator
+
 # Input sanitization
 def sanitize_input(query):
     sanitized = re.sub(r"[^\w\s]", "", query).strip()
@@ -205,6 +245,7 @@ async def home():
 
 @app.route('/interact', methods=['GET', 'POST'])
 @limiter.limit("10 per minute")
+@validate_request(InteractSchema)
 async def interact():
     user_input = (await request.json).get('input') if request.method == 'POST' else request.args.get('input')
     if not user_input:
@@ -269,6 +310,7 @@ async def interact():
 
 @app.route('/search', methods=['GET', 'POST'])
 @limiter.limit("20 per minute")
+@validate_request(InteractSchema)
 async def search_trends():
     query = request.args.get('q') if request.method == 'GET' else (await request.json).get('q')
     if not query:
@@ -336,6 +378,7 @@ async def search_trends():
 
 @app.route('/process-query', methods=['POST'])
 @limiter.limit("10 per minute")
+@validate_request(InteractSchema)
 async def process_query():
     try:
         query = (await request.json).get('q') if request.is_json else (await request.form).get('q')
