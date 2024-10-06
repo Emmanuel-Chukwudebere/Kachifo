@@ -7,8 +7,8 @@ import asyncio
 import time
 from quart import Quart, request, jsonify, render_template, Response, stream_with_context
 from quart_sqlalchemy import SQLAlchemy
-from quart_limiter import Limiter
-from quart_limiter.util import get_remote_address
+# from quart_limiter import Limiter
+# from quart_limiter.util import get_remote_address
 from aiocache import Cache
 from aiocache.serializers import JsonSerializer
 from quart_talisman import Talisman
@@ -51,11 +51,11 @@ db = SQLAlchemy(app)
 cache = Cache(Cache.MEMORY, serializer=JsonSerializer())
 
 # Rate Limiting Configuration
-limiter = Limiter(
-    key_func=get_remote_address,
-    app=app,
-    default_limits=["100 per day", "30 per hour"]
-)
+# limiter = Limiter(
+    # key_func=get_remote_address,
+    # app=app,
+    # default_limits=["100 per day", "30 per hour"]
+# )
 
 # Initialize Hugging Face Client
 inference_client = InferenceClient(token=os.getenv("HUGGINGFACE_API_KEY"))
@@ -253,7 +253,7 @@ same)
 
 # Update the interact function to use generate_conversational_response
 @app.route('/interact', methods=['GET', 'POST'])
-@limiter.limit("10 per minute")
+# @limiter.limit("10 per minute")
 @validate_request(InteractSchema)
 async def interact():
     user_input = (await request.json).get('input') if request.method == 'POST' else request.args.get('input')
@@ -317,7 +317,7 @@ async def interact():
 
 # Update the search_trends function to use fetch_trending_topics and summarize_with_hf
 @app.route('/search', methods=['GET', 'POST'])
-@limiter.limit("20 per minute")
+# @limiter.limit("20 per minute")
 @validate_request(InteractSchema)
 async def search_trends():
     query = request.args.get('q') if request.method == 'GET' else (await request.json).get('q')
@@ -389,7 +389,7 @@ async def search_trends():
 
 # Update the process_query function to use extract_entities_with_hf, fetch_trending_topics, and generate_general_summary
 @app.route('/process-query', methods=['POST'])
-@limiter.limit("10 per minute")
+# @limiter.limit("10 per minute")
 @validate_request(InteractSchema)
 async def process_query():
     try:
@@ -484,7 +484,7 @@ async def process_query():
 
 
 @app.route('/recent_searches', methods=['GET'])
-@limiter.limit("30 per minute")
+# @limiter.limit("30 per minute")
 async def recent_searches():
     try:
         # Create an event to signal when the response has started
@@ -551,9 +551,9 @@ async def handle_exception(e):
     logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
     return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
-@app.errorhandler(429)
-async def ratelimit_handler(e):
-    return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
+# @app.errorhandler(429)
+# async def ratelimit_handler(e):
+    # return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
 
 # Initialize the database and cache
 @app.before_serving
