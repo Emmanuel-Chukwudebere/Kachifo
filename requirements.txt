@@ -1,84 +1,100 @@
-requests_oauthlib
-html2text
-beautifulsoup4
-numpy==1.26.4
-scipy
-pandas
-spacy
+# Asynchronous web framework
+quart==            # Quart for handling asynchronous web requests
+
+# HTTP libraries
+aiohttp                   # For making asynchronous HTTP requests
+httpx                     # Optional: Another HTTP library that supports async
+
+# Data manipulation libraries
+numpy==1.26.4            # For numerical operations
+pandas                    # Data manipulation and analysis
+scipy                     # For scientific computations
+spacy                     # NLP library
+
+# Spacy model (ensure this matches the version you need)
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.5.0/en_core_web_sm-3.5.0.tar.gz
 
-aiohttp
-aioflask
-annotated-types
-bitsandbytes
-blinker
-cachelib
-cachetools
-certifi
-cffi
-charset-normalizer
-click
-colorama
-cryptography
-datasets
-distro
-Flask
-Flask[async]
-Flask-Caching
-Flask-Cors
-Flask-Limiter
-Flask-SQLAlchemy
-flask_talisman
-google-api-core
-google-api-python-client
-google-auth
-google-auth-httplib2
-googleapis-common-protos
-greenlet
-gunicorn
-h11
-httpcore
-httplib2
-httpx
-huggingface_hub
-idna
-itsdangerous
-Jinja2
-jiter
-MarkupSafe
-marshmallow
-nltk
-praw
-prawcore
-proto-plus
-protobuf
-psycopg2
-psycopg2-binary
-pyasn1
-pyasn1_modules
-pycparser
-pydantic
-pydantic_core
-PyMySQL
-pyparsing
-python-dotenv
-pytrends
-ratelimit
-requests
-requests-oauthlib
-rsa
-sentry-sdk
-sniffio
-SQLAlchemy
-thinc
-tokenizers
-torchaudio
-torchvision
-tqdm
-tweepy
-typing_extensions
-update-checker
-uritemplate
-urllib3
-websocket-client
-Werkzeug
+# Caching libraries
+cachelib                  # Caching library compatible with Flask/Caching
+cachetools                # Cache utilities
+
+# API libraries
+huggingface_hub          # For Hugging Face model access
+praw                     # For accessing Reddit API
+tweepy                   # For accessing Twitter API
+google-api-core          # Core libraries for Google API
+google-api-python-client  # Client library for Google APIs
+google-auth              # Authentication for Google services
+
+# Flask-related libraries that may still be useful
+Flask-Caching             # For caching support, ensure compatibility with Quart
+Flask-Cors                # For handling Cross-Origin Resource Sharing
+Flask-Limiter             # Rate limiting, check for Quart compatibility
+Flask-SQLAlchemy          # For SQLAlchemy support; you can use SQLAlchemy directly with Quart
+flask_talisman            # Security features; consider using alternative security features in Quart
+
+# Authentication libraries
+requests                  # For making HTTP requests
+requests-oauthlib        # For OAuth authentication
+
+# Other dependencies
+beautifulsoup4            # For HTML parsing
+html2text                 # For converting HTML to plain text
+nltk                     # Natural Language Toolkit
+datasets                  # For working with datasets
+cryptography              # For cryptographic operations
+gunicorn                  # WSGI HTTP server; optional if using with Quart
+sqlalchemy                # ORM for database interaction
+psycopg2                 # PostgreSQL adapter
+psycopg2-binary          # Binary package for psycopg2
+PyMySQL                  # MySQL adapter if needed
+
+# Development utilities
+python-dotenv             # For loading environment variables
+sentry-sdk                # For error tracking and monitoring
+Werkzeug                  # May still be needed for some utilities; check Quart documentation
+
+# Other libraries
+aioflask                 # For integrating Flask's features with async functionality
+annotated-types          # Type hints for Python
+bitsandbytes              # Library for managing large tensors
+blinker                   # For signal support
+certifi                  # For SSL certificates
+cffi                     # Foreign Function Interface for Python
+charset-normalizer       # For character encoding
+click                    # For creating command-line interfaces
+colorama                 # For terminal text color
+distro                   # For retrieving information about the Linux distribution
+greenlet                 # For lightweight in-process concurrent programming
+h11                      # HTTP/1.1 protocol library
+httpcore                 # Low-level HTTP library
+httplib2                 # Comprehensive HTTP client library
+idna                     # Internationalized Domain Names in Applications (IDNA)
+itsdangerous             # For secure cookie signing
+Jinja2                   # Templating engine
+jiter                    # Library for jittered sampling
+MarkupSafe               # For safe string handling in HTML
+marshmallow              # For object serialization and deserialization
+pydantic                # Data validation and settings management using Python type annotations
+pydantic_core           # Core functionality for Pydantic
+proto-plus               # Protocol Buffers with better support
+protobuf                 # For protocol buffer serialization
+pyasn1                   # ASN.1 (Abstract Syntax Notation One) support
+pyasn1_modules           # Additional modules for pyasn1
+pycparser                # C parser in Python
+pyparsing                # For parsing text
+ratelimit                # For rate limiting in code
+rsa                      # For RSA encryption and decryption
+sentry-sdk               # For monitoring and error reporting
+sniffio                  # For async testing utilities
+SQLAlchemy               # SQL toolkit and Object-Relational Mapping (ORM)
+thinc                    # Machine learning library
+tokenizers               # For tokenization in NLP tasks
+torchaudio               # For audio processing with PyTorch
+torchvision              # For image processing with PyTorch
+tqdm                     # For progress bar in loops
+typing_extensions         # Backports of typing features
+update-checker           # For checking for package updates
+uritemplate              # For URI templating
+urllib3                  # For working with URLs
+websocket-client          # For WebSocket client support
