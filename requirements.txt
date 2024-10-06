@@ -26,12 +26,12 @@ google-api-core          # Core libraries for Google API
 google-api-python-client  # Client library for Google APIs
 google-auth              # Authentication for Google services
 
-# Flask-related libraries that may still be useful
-Flask-Caching             # For caching support, ensure compatibility with Quart
-Flask-Cors                # For handling Cross-Origin Resource Sharing
-Flask-Limiter             # Rate limiting, check for Quart compatibility
-Flask-SQLAlchemy          # For SQLAlchemy support; you can use SQLAlchemy directly with Quart
-flask_talisman            # Security features; consider using alternative security features in Quart
+# quart-related libraries that may still be useful
+quart-Caching             # For caching support, ensure compatibility with Quart
+quart-Cors                # For handling Cross-Origin Resource Sharing
+quart-Limiter             # Rate limiting, check for Quart compatibility
+quart-SQLAlchemy          # For SQLAlchemy support; you can use SQLAlchemy directly with Quart
+quart_talisman            # Security features; consider using alternative security features in Quart
 
 # Authentication libraries
 requests                  # For making HTTP requests
