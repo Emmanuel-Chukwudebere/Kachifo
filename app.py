@@ -9,17 +9,28 @@ from quart import Quart, request, jsonify, render_template, Response, stream_wit
 from quart_sqlalchemy import SQLAlchemy
 from quart_limiter import Limiter
 from quart_limiter.util import get_remote_address
-from flask_caching import Cache
+from aiocache import Cache
+from aiocache.serializers import JsonSerializer
 from quart_talisman import Talisman
 from functools import wraps
 from sqlalchemy.exc import SQLAlchemyError
 from werkzeug.exceptions import HTTPException
 from logging.handlers import RotatingFileHandler
-from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf, generate_conversational_response
-from huggingface_hub import InferenceClient
 from marshmallow import Schema, fields, validate
-import threading
 
+# Import the correct functions from api_integrations.py
+from api_integrations import (
+    get_trending_topics,
+    summarize_with_hf,
+    extract_entities_with_hf,
+    generate_conversational_response,
+    generate_general_summary,
+    init_cache,
+    shutdown
+)
+
+
+# Initialize Quart app
 app = Quart(__name__)
 
 # Security headers using Talisman
@@ -32,14 +43,12 @@ Talisman(app, content_security_policy={
 })
 
 # Database Configuration for PostgreSQL on Render
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql+psycopg2://kachifodb_user:bmSBnUVP4UEFw6B5dYLgoCu3Xi3uDF4I@dpg-cs1bci3tq21c73envab0-a/kachifodb')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql+asyncpg://kachifodb_user:bmSBnUVP4UEFw6B5dYLgoCu3Xi3uDF4I@dpg-cs1bci3tq21c73envab0-a/kachifodb')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# Caching Configuration
-app.config['CACHE_TYPE'] = 'simple'
-app.config['CACHE_DEFAULT_TIMEOUT'] = 300
-cache = Cache(app)
+# Caching Configuration with aiocache
+cache = Cache(Cache.MEMORY, serializer=JsonSerializer())
 
 # Rate Limiting Configuration
 limiter = Limiter(
@@ -111,7 +120,7 @@ def create_standard_response(data, status_code, message):
 loading_messages = [
     "AI is fetching trends for you!",
     "Hold tight! We're gathering data...",
-    "Did you know: The term ‘trending’ was popularized by social media?",
+    "Did you know: The term 'trending' was popularized by social media?",
     "Did you know? Honey never spoils.",
     "Fact: Bananas are berries, but strawberries aren't!",
     "Fun fact: Octopuses have three hearts.",
@@ -124,9 +133,9 @@ loading_messages = [
     "Bees can recognize human faces.",
     "Did you know AI can predict trends 10x faster than humans?",
     "Tip: Try searching for trending news about technology.",
-    "Here’s a fun fact: The first tweet was posted in 2006 by Twitter's founder.",
-    "Hold tight! We’re fetching the latest news from the web for you!",
-    "Fun fact: The term ‘trending’ was popularized by social media platforms.",
+    "Here's a fun fact: The first tweet was posted in 2006 by Twitter's founder.",
+    "Hold tight! We're fetching the latest news from the web for you!",
+    "Fun fact: The term 'trending' was popularized by social media platforms.",
     "Did you know that over 3.6 billion people use social media worldwide?",
     "Tip: Ask about the latest trends in your favorite topics!",
     "Here's a trivia: The word 'hashtag' was first used in 2007.",
@@ -149,7 +158,6 @@ def validate_request(schema_class):
         async def decorated_function(*args, **kwargs):
             schema = schema_class()
             errors = {}
-
             # Validate based on request method
             if request.method == 'GET':
                 try:
@@ -167,10 +175,9 @@ def validate_request(schema_class):
                         schema.load(await request.form)
                     except ValidationError as err:
                         errors = err.messages
-            
             if errors:
                 return create_standard_response({'errors': errors}, 400, "Invalid request parameters")
-            return await f(*args, **kwargs)  # Ensure the function is awaited
+            return await f(*args, **kwargs)
         return decorated_function
     return decorator
 
@@ -216,7 +223,6 @@ async def merged_stream(user_input):
     response_started = asyncio.Event()  # Moved here to ensure it's created for each request
     loading_task = asyncio.create_task(send_loading_messages(response_started))
     process_task = asyncio.create_task(stream_blender_response(user_input, response_started))
-    
     while True:
         done, pending = await asyncio.wait(
             [loading_task, process_task],
@@ -237,12 +243,15 @@ async def merged_stream(user_input):
                 break
             except StopAsyncIteration:
                 break
-                
+
 @app.route('/')
 async def home():
     logger.info("Home page accessed")
     return await render_template('index.html', message="Welcome to Kachifo - Discover trends")
 
+same)
+
+# Update the interact function to use generate_conversational_response
 @app.route('/interact', methods=['GET', 'POST'])
 @limiter.limit("10 per minute")
 @validate_request(InteractSchema)
@@ -250,23 +259,21 @@ async def interact():
     user_input = (await request.json).get('input') if request.method == 'POST' else request.args.get('input')
     if not user_input:
         return jsonify({'error': 'No input provided.'}), 400
-
-    input_type = classify_input_type(user_input)
     
-    # Use merged_stream to handle loading and response streaming
-    response_started = asyncio.Event()  # Track if the response has started
+    input_type = classify_input_type(user_input)
+    response_started = asyncio.Event()
 
     async def merged_stream():
         loading_task = asyncio.create_task(send_loading_messages(response_started))
         
-        # Define response generation based on input type
         async def generate_response():
             try:
                 if input_type == 'conversation':
-                    async for token in stream_blender_response(user_input, response_started):
-                        yield token
-                else:  # Handle trending topics
-                    trends = await fetch_trending_topics(user_input)
+                    response = await generate_conversational_response(user_input)
+                    response_started.set()
+                    yield f"data: {response}\n\n"
+                else:
+                    trends = await get_trending_topics(user_input)
                     summaries = []
                     for trend in trends:
                         summary = await summarize_with_hf(f"{trend['title']} {trend['summary']}")
@@ -276,7 +283,7 @@ async def interact():
                             'summary': summary,
                             'url': trend['url']
                         })
-                    response_started.set()  # Signal that response has started
+                    response_started.set()
                     yield f"data: {json.dumps({'query': user_input, 'results': summaries})}\n\n"
             except Exception as e:
                 response_started.set()
@@ -284,7 +291,7 @@ async def interact():
                 yield "data: {'error': 'An error occurred while generating the response.'}\n\n"
 
         response_task = asyncio.create_task(generate_response())
-        
+
         while True:
             done, pending = await asyncio.wait(
                 [loading_task, response_task],
@@ -308,6 +315,7 @@ async def interact():
 
     return Response(stream_with_context(merged_stream()), content_type='text/event-stream')
 
+# Update the search_trends function to use fetch_trending_topics and summarize_with_hf
 @app.route('/search', methods=['GET', 'POST'])
 @limiter.limit("20 per minute")
 @validate_request(InteractSchema)
@@ -315,16 +323,19 @@ async def search_trends():
     query = request.args.get('q') if request.method == 'GET' else (await request.json).get('q')
     if not query:
         return create_standard_response({'error': 'Query parameter "q" is required'}, 400, "Query parameter missing")
-
+    
     query = sanitize_input(query)
-
-    # Start the response tracking
-    response_started = asyncio.Event()  
+    response_started = asyncio.Event()
 
     async def generate_search_response():
         try:
-            # Fetch trending topics asynchronously
-            results = await fetch_trending_topics(query)
+            cached_results = await cache.get(f"search:{query}")
+            if cached_results:
+                logger.info(f"Cache hit for query: {query}")
+                yield f"data: {json.dumps(cached_results)}\n\n"
+                return
+
+            results = await get_trending_topics(query)
             if not results:
                 yield "data: {'error': 'No results found.'}\n\n"
                 return
@@ -341,9 +352,9 @@ async def search_trends():
                     'url': result.get('url', '')
                 })
 
-            # Generate a general summary from the individual summaries
             general_summary = await generate_general_summary([s['summary'] for s in summaries])
             final_response = {'query': query, 'results': summaries, 'general_summary': general_summary}
+            await cache.set(f"search:{query}", final_response, ttl=3600)
             yield f"data: {json.dumps(final_response)}\n\n"
         except Exception as e:
             logger.error(f"Error in search_trends: {str(e)}", exc_info=True)
@@ -376,6 +387,7 @@ async def search_trends():
 
     return Response(stream_with_context(merged_stream()), content_type='text/event-stream')
 
+# Update the process_query function to use extract_entities_with_hf, fetch_trending_topics, and generate_general_summary
 @app.route('/process-query', methods=['POST'])
 @limiter.limit("10 per minute")
 @validate_request(InteractSchema)
@@ -387,29 +399,26 @@ async def process_query():
             return create_standard_response({'error': 'Query is required'}, 400, "Query is required")
 
         query = sanitize_input(query)
-        response_started = asyncio.Event()  # Track if the response has started
-
-        async def send_loading_messages():
-            while not response_started.is_set():
-                loading_message = random.choice(loading_messages)
-                yield f"data: {loading_message}\n\n"
-                await asyncio.sleep(2)
+        response_started = asyncio.Event()
 
         async def process_and_respond():
             try:
-                # Extract entities using Hugging Face
+                cached_result = await cache.get(f"processed_query:{query}")
+                if cached_result:
+                    logger.info(f"Cache hit for processed query: {query}")
+                    response_started.set()
+                    yield f"data: {json.dumps(cached_result)}\n\n"
+                    return
+
                 processed_query_data = await extract_entities_with_hf(query)
 
-                # Store query in the database
                 new_query = UserQuery(query=query)
                 new_query.set_hf_data(processed_query_data)
                 db.session.add(new_query)
-                db.session.commit()
+                await db.session.commit()
 
-                # Fetch trending topics
-                trends = await fetch_trending_topics(query)
+                trends = await get_trending_topics(query)
 
-                # Summarize the trends
                 summaries = []
                 for trend in trends:
                     title = trend.get('title', '')
@@ -417,29 +426,28 @@ async def process_query():
                     full_summary = await summarize_with_hf(f"{title} {summary}")
                     summaries.append(full_summary)
 
-                # Generate a general summary
                 general_summary = await generate_general_summary(summaries)
 
-                # Prepare context for BlenderBot
                 context = f"Query: {query}\nTrending topics: {general_summary}"
+                response = await generate_conversational_response(context)
 
-                # Generate conversational response using BlenderBot
-                response_stream = await inference_client.chat_completion(
-                    messages=[
-                        {"role": "system", "content": "You are an AI assistant helping with trending topics."},
-                        {"role": "user", "content": context}
-                    ],
-                    stream=True
-                )
-                response_started.set()  # Signal that the response has started
-                async for token in response_stream:
-                    yield f"data: {token['choices'][0]['delta']['content']}\n\n"
+                response_started.set()
+                yield f"data: {response}\n\n"
+
+                cache_data = {
+                    "query": query,
+                    "entities": processed_query_data['entities'],
+                    "trends": trends,
+                    "general_summary": general_summary,
+                    "response": response
+                }
+                await cache.set(f"processed_query:{query}", cache_data, ttl=3600)
+
             except Exception as e:
                 response_started.set()
                 logger.error(f"Error processing query: {str(e)}", exc_info=True)
                 yield f"data: {{'error': 'An unexpected error occurred. Please try again later.'}}\n\n"
 
-        # Merged stream for loading and response
         async def merged_stream():
             loading_task = asyncio.create_task(send_loading_messages())
             response_task = asyncio.create_task(process_and_respond())
@@ -474,7 +482,7 @@ async def process_query():
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
-# Route to fetch recent searches
+
 @app.route('/recent_searches', methods=['GET'])
 @limiter.limit("30 per minute")
 async def recent_searches():
@@ -484,10 +492,22 @@ async def recent_searches():
 
         async def fetch_recent_searches():
             try:
+                # Check cache first
+                cached_searches = await cache.get("recent_searches")
+                if cached_searches:
+                    logger.info("Cache hit for recent searches")
+                    yield f"data: {json.dumps(cached_searches)}\n\n"
+                    return
+
                 # Fetch recent queries from the database
-                recent_queries = UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
-                for q in recent_queries:
-                    yield f"data: {json.dumps({'query': q.query, 'timestamp': q.timestamp.isoformat()})}\n\n"
+                recent_queries = await UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
+                searches = [{'query': q.query, 'timestamp': q.timestamp.isoformat()} for q in recent_queries]
+
+                # Cache the results
+                await cache.set("recent_searches", searches, ttl=300)  # Cache for 5 minutes
+
+                for search in searches:
+                    yield f"data: {json.dumps(search)}\n\n"
             except SQLAlchemyError as e:
                 logger.error(f"Database error in recent_searches: {str(e)}", exc_info=True)
                 yield f"data: {{'error': 'A database error occurred. Please try again later.'}}\n\n"
@@ -498,7 +518,6 @@ async def recent_searches():
         async def merged_stream():
             loading_task = asyncio.create_task(send_loading_messages(response_started))
             response_task = asyncio.create_task(fetch_recent_searches())
-
             while True:
                 done, pending = await asyncio.wait(
                     [loading_task, response_task],
@@ -536,8 +555,17 @@ async def handle_exception(e):
 async def ratelimit_handler(e):
     return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
 
-# Initialize the database
+# Initialize the database and cache
+@app.before_serving
+async def initialize():
+    async with app.app_context():
+        await db.create_all()
+    await init_cache()
+
+# Shutdown function
+@app.teardown_appcontext
+async def shutdown_app(exception=None):
+    await shutdown()
+
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()  # Initialize the database
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), use_reloader=False)
