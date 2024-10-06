@@ -82,7 +82,7 @@ logger = logging.getLogger(__name__)
 loading_messages = [
     "AI is fetching trends for you!",
     "Hold tight! We're gathering data...",
-    "Did you know: The term ‘trending’ was popularized by social media?"
+    "Did you know: The term ‘trending’ was popularized by social media?",
     "Did you know? Honey never spoils.",
     "Fact: Bananas are berries, but strawberries aren't!",
     "Fun fact: Octopuses have three hearts.",
@@ -92,7 +92,7 @@ loading_messages = [
     "A snail can sleep for three years.",
     "Wombat poop is cube-shaped.",
     "You can't hum while holding your nose closed.",
-    "Bees can recognize human faces."
+    "Bees can recognize human faces.",
     "Did you know AI can predict trends 10x faster than humans?",
     "Tip: Try searching for trending news about technology.",
     "Here’s a fun fact: The first tweet was posted in 2006 by Twitter's founder.",
@@ -162,55 +162,32 @@ def classify_input_type(user_input):
 async def fetch_async(query):
     return fetch_trending_topics(query)
 
-# Stream loading messages and final results
-async def stream_with_loading_messages(query):
-    global results
-    results = await fetch_async(query)
-
-    # Streaming loading messages until data is fetched
-    while not results:
-        yield f"data: {random.choice(loading_messages)}\n\n"
-        await asyncio.sleep(2)
-
-    if results:
-        summaries = []
-        individual_summaries = []
-        for result in results:
-            title = result.get('title', '')
-            summary = result.get('summary', '')
-            full_summary = summarize_with_hf(f"{title} {summary}")
-            individual_summaries.append(full_summary)
-            summaries.append({
-                'source': result.get('source', ''),
-                'title': title,
-                'summary': full_summary,
-                'url': result.get('url', '')
-            })
-        general_summary = generate_general_summary(individual_summaries)
-        final_response = {
-            'query': query,
-            'results': summaries,
-            'general_summary': general_summary
-        }
-        yield f"data: {json.dumps(final_response)}\n\n"
-    else:
-        yield "data: {'error': 'No results found.'}\n\n"
-
-# Stream BlenderBot responses
-async def stream_blender_response(response_stream):
-    try:
-        async for token in response_stream:
-            yield f"data: {token['choices'][0]['delta']['content']}\n\n"
-    except Exception as e:
-        logger.error(f"Error while streaming response: {str(e)}")
-        yield "data: {'error': 'Failed to generate response.'}\n\n"
-
+# Helper for async handling in synchronous context
 def async_to_sync(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        return asyncio.get_event_loop().run_until_complete(f(*args, **kwargs))
+        return asyncio.run(f(*args, **kwargs))  # Create and run a new event loop
     return wrapper
 
+# Stream BlenderBot responses
+async def stream_blender_response(user_input, response_started):
+    try:
+        response_stream = await inference_client.chat_completion(messages=[{"role": "user", "content": user_input}], stream=True)
+        response_started.set()  # Signal that the response has started
+        async for token in response_stream:
+            yield f"data: {token['choices'][0]['delta']['content']}\n\n"
+    except Exception as e:
+        response_started.set()
+        logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
+        yield "data: {'error': 'Failed to generate response.'}\n\n"
+
+# Stream loading messages until the response starts
+async def send_loading_messages(response_started):
+    while not response_started.is_set():
+        loading_message = random.choice(loading_messages)
+        yield f"data: {loading_message}\n\n"
+        await asyncio.sleep(2)
+        
 # Routes
 @app.route('/')
 def home():
@@ -231,35 +208,67 @@ def interact():
         try:
             @async_to_sync
             async def generate_blender_response():
-                response_stream = await inference_client.chat_completion(
-                    messages=[{"role": "user", "content": user_input}],
-                    stream=True
-                )
-                async for token in response_stream:
-                    yield f"data: {token['choices'][0]['delta']['content']}\n\n"
-            
-            return Response(stream_with_context(generate_blender_response()), content_type='text/event-stream')
+                response_started = asyncio.Event()
+
+                # Function to yield loading messages
+                async def send_loading_messages():
+                    while not response_started.is_set():
+                        loading_message = random.choice(loading_messages)
+                        yield f"data: {loading_message}\n\n"
+                        await asyncio.sleep(2)  # Adjust the sleep time as needed
+
+                # Function to stream the BlenderBot response
+                async def stream_blender_response():
+                    try:
+                        response_stream = await inference_client.chat_completion(
+                            messages=[{"role": "user", "content": user_input}],
+                            stream=True
+                        )
+                        response_started.set()  # Signal that response has started
+                        async for token in response_stream:
+                            yield f"data: {token['choices'][0]['delta']['content']}\n\n"
+                    except Exception as e:
+                        response_started.set()  # Ensure the loading messages stop
+                        logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
+                        yield f"data: {{'error': 'An error occurred. Please try again later.'}}\n\n"
+
+                # Merge the loading messages and the BlenderBot response
+                async def merged_stream():
+                    loading_task = asyncio.create_task(send_loading_messages().__anext__())
+                    response_task = asyncio.create_task(stream_blender_response().__anext__())
+
+                    while True:
+                        done, pending = await asyncio.wait(
+                            [loading_task, response_task],
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+
+                        if loading_task in done:
+                            try:
+                                loading_message = loading_task.result()
+                                yield loading_message
+                                if not response_started.is_set():
+                                    loading_task = asyncio.create_task(send_loading_messages().__anext__())
+                            except StopAsyncIteration:
+                                pass  # No more loading messages
+
+                        if response_task in done:
+                            try:
+                                response_message = response_task.result()
+                                yield response_message
+                                response_task = asyncio.create_task(stream_blender_response().__anext__())
+                            except StopAsyncIteration:
+                                break  # Response fully streamed
+
+                return Response(stream_with_context(merged_stream()), content_type='text/event-stream')
+
+            return generate_blender_response()
+
         except Exception as e:
             logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
             return create_standard_response(None, 500, "An error occurred. Please try again later.")
 
-    # Handle query-type input
-    elif input_type == 'query':
-        try:
-            logger.info(f"Handling query: {user_input}")
-            
-            @async_to_sync
-            async def generate_query_response():
-                async for message in stream_with_loading_messages(user_input):
-                    yield message
-
-            return Response(stream_with_context(generate_query_response()), content_type='text/event-stream')
-        except Exception as e:
-            logger.error(f"Error streaming query: {str(e)}", exc_info=True)
-            return create_standard_response(None, 500, "An error occurred while processing your request.")
-
-    return jsonify({'error': 'Invalid input type.'}), 400
-
+# Route to search trends
 @app.route('/search', methods=['GET', 'POST'])
 @rate_limit
 def search_trends():
@@ -271,8 +280,28 @@ def search_trends():
 
     @async_to_sync
     async def generate_search_response():
-        async for message in stream_with_loading_messages(query):
-            yield message
+        results = await fetch_trending_topics(query)
+        if not results:
+            yield "data: {'error': 'No results found.'}\n\n"
+            return
+        
+        summaries = []
+        individual_summaries = []
+        for result in results:
+            title = result.get('title', '')
+            summary = result.get('summary', '')
+            full_summary = await summarize_with_hf(f"{title} {summary}")
+            individual_summaries.append(full_summary)
+            summaries.append({
+                'source': result.get('source', ''),
+                'title': title,
+                'summary': full_summary,
+                'url': result.get('url', '')
+            })
+
+        general_summary = await generate_general_summary(individual_summaries)
+        final_response = {'query': query, 'results': summaries, 'general_summary': general_summary}
+        yield f"data: {json.dumps(final_response)}\n\n"
 
     return Response(stream_with_context(generate_search_response()), content_type='text/event-stream')
 
@@ -289,46 +318,71 @@ def process_query():
 
         @async_to_sync
         async def process_query_async():
-            # Extract entities from query using Hugging Face API
-            processed_query_data = await extract_entities_with_hf(query)
-            
-            # Store the query in the database
-            new_query = UserQuery(query=query)
-            new_query.set_hf_data(processed_query_data)
-            db.session.add(new_query)
-            db.session.commit()
-            
-            # Generate trending topics
-            trends = await fetch_trending_topics(query)
-            
-            # Summarize trends
-            summaries = []
-            for trend in trends:
-                title = trend.get('title', '')
-                summary = trend.get('summary', '')
-                full_summary = await summarize_with_hf(f"{title} {summary}")
-                summaries.append(full_summary)
-            
-            # Generate a general summary
-            general_summary = await generate_general_summary(summaries)
-            
-            # Prepare context for BlenderBot
-            context = f"Query: {query}\nTrending topics: {general_summary}"
-            
-            # Generate conversational response using BlenderBot
-            response_stream = await inference_client.chat_completion(
-                messages=[
-                    {"role": "system", "content": "You are an AI assistant helping with trending topics."},
-                    {"role": "user", "content": context}
-                ],
-                stream=True
-            )
-            
-            # Stream the response
-            async for token in response_stream:
-                yield f"data: {token['choices'][0]['delta']['content']}\n\n"
+            response_started = asyncio.Event()
 
-        return Response(stream_with_context(process_query_async()), content_type='text/event-stream')
+            # Function to yield loading messages
+            async def send_loading_messages():
+                while not response_started.is_set():
+                    loading_message = random.choice(loading_messages)
+                    yield f"data: {loading_message}\n\n"
+                    await asyncio.sleep(2)
+
+            # Function to process the query and stream the response
+            async def process_and_respond():
+                try:
+                    # [Your existing code to process the query]
+                    # For example:
+                    trends = await fetch_trending_topics(query)
+                    # ... Summarize and generate context ...
+
+                    # Generate conversational response using BlenderBot
+                    response_stream = await inference_client.chat_completion(
+                        messages=[
+                            {"role": "system", "content": "You are an AI assistant helping with trending topics."},
+                            {"role": "user", "content": context}
+                        ],
+                        stream=True
+                    )
+                    response_started.set()
+                    async for token in response_stream:
+                        yield f"data: {token['choices'][0]['delta']['content']}\n\n"
+                except Exception as e:
+                    response_started.set()
+                    logger.error(f"Error processing query: {str(e)}", exc_info=True)
+                    yield f"data: {{'error': 'An unexpected error occurred. Please try again later.'}}\n\n"
+
+            # Merge the loading messages and the response
+            async def merged_stream():
+                loading_task = asyncio.create_task(send_loading_messages().__anext__())
+                response_task = asyncio.create_task(process_and_respond().__anext__())
+
+                while True:
+                    done, pending = await asyncio.wait(
+                        [loading_task, response_task],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+
+                    if loading_task in done:
+                        try:
+                            loading_message = loading_task.result()
+                            yield loading_message
+                            if not response_started.is_set():
+                                loading_task = asyncio.create_task(send_loading_messages().__anext__())
+                        except StopAsyncIteration:
+                            pass  # No more loading messages
+
+                    if response_task in done:
+                        try:
+                            response_message = response_task.result()
+                            yield response_message
+                            response_task = asyncio.create_task(process_and_respond().__anext__())
+                        except StopAsyncIteration:
+                            break  # Response fully streamed
+
+            return Response(stream_with_context(merged_stream()), content_type='text/event-stream')
+
+        return process_query_async()
+
     except SQLAlchemyError as e:
         logger.error(f"Database error: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "A database error occurred. Please try again later.")
@@ -336,6 +390,7 @@ def process_query():
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
 
+# Route to fetch recent searches
 @app.route('/recent_searches', methods=['GET'])
 @rate_limit
 def recent_searches():
@@ -343,7 +398,7 @@ def recent_searches():
         @async_to_sync
         async def fetch_recent_searches_async():
             # Fetch recent searches from the database asynchronously
-            recent_queries = await fetch_recent_queries()
+            recent_queries = UserQuery.query.order_by(UserQuery.timestamp.desc()).limit(10).all()
             for q in recent_queries:
                 yield f"data: {q.query}\n\n"
 
