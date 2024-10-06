@@ -1,7 +1,7 @@
 psycopg2-binary
 
 # Asynchronous web framework
-quart==            # Quart for handling asynchronous web requests
+quart                     # Quart for handling asynchronous web requests
 
 # HTTP libraries
 aiohttp                   # For making asynchronous HTTP requests
