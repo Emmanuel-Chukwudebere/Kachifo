@@ -177,9 +177,11 @@ def validate_request(schema_class):
 # rate limit per ip
 limiter = Limiter(
     key_func=get_remote_address,
-    app=app,
     default_limits=["100 per day", "30 per hour"]
 )
+
+# Then attach it to the app
+limiter.init_app(app)
 
 # Input sanitization and classification
 def sanitize_input(query):
