@@ -9,7 +9,7 @@ from quart import Quart, request, jsonify, render_template, Response, stream_wit
 from quart_sqlalchemy import SQLAlchemy
 from quart_limiter import Limiter
 from quart_limiter.util import get_remote_address
-from quart_caching import Cache
+from flask_caching import Cache
 from quart_talisman import Talisman
 from functools import wraps
 from sqlalchemy.exc import SQLAlchemyError
