@@ -32,7 +32,7 @@ google-auth              # Authentication for Google services
 # quart-related libraries that may still be useful
 # quart-Cache             # For caching support, ensure compatibility with Quart
 quart-Cors                # For handling Cross-Origin Resource Sharing
-quart-Limiter             # Rate limiting, check for Quart compatibility
+# quart-Limiter             # Rate limiting, check for Quart compatibility
 quart-SQLAlchemy          # For SQLAlchemy support; you can use SQLAlchemy directly with Quart
 quart_talisman            # Security features; consider using alternative security features in Quart
 
