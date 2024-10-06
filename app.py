@@ -205,18 +205,16 @@ async def stream_blender_response(response_stream):
         logger.error(f"Error while streaming response: {str(e)}")
         yield "data: {'error': 'Failed to generate response.'}\n\n"
 
-# Routes
-@app.route('/')
-def home():
-    logger.info("Home page accessed")
-    return render_template('index.html', message="Welcome to Kachifo - Discover trends")
+def async_to_sync(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        return asyncio.get_event_loop().run_until_complete(f(*args, **kwargs))
+    return wrapper
 
-# Routes
 @app.route('/interact', methods=['GET', 'POST'])
 @rate_limit
-async def interact():  # async function definition
+def interact():
     user_input = request.json.get('input') if request.method == 'POST' else request.args.get('input')
-
     if not user_input:
         return jsonify({'error': 'No input provided.'}), 400
 
@@ -225,14 +223,16 @@ async def interact():  # async function definition
     # Handle conversational input with BlenderBot
     if input_type == 'conversation':
         try:
-            response_stream = await inference_client.chat_completion(
-                messages=[{"role": "user", "content": user_input}],
-                stream=True
-            )  # Directly await the coroutine
+            @async_to_sync
+            async def generate_blender_response():
+                response_stream = await inference_client.chat_completion(
+                    messages=[{"role": "user", "content": user_input}],
+                    stream=True
+                )
+                async for token in response_stream:
+                    yield f"data: {token['choices'][0]['delta']['content']}\n\n"
             
-            logger.info(f"Response stream created for BlenderBot: {response_stream}")
-            return Response(stream_with_context(stream_blender_response(response_stream)),
-                            content_type='text/event-stream')
+            return Response(stream_with_context(generate_blender_response()), content_type='text/event-stream')
         except Exception as e:
             logger.error(f"Error with BlenderBot: {str(e)}", exc_info=True)
             return create_standard_response(None, 500, "An error occurred. Please try again later.")
@@ -241,81 +241,111 @@ async def interact():  # async function definition
     elif input_type == 'query':
         try:
             logger.info(f"Handling query: {user_input}")
-            return Response(stream_with_context(await stream_with_loading_messages(user_input)),  # Await the function here
-                            content_type='text/event-stream')
+            
+            @async_to_sync
+            async def generate_query_response():
+                async for message in stream_with_loading_messages(user_input):
+                    yield message
+
+            return Response(stream_with_context(generate_query_response()), content_type='text/event-stream')
         except Exception as e:
             logger.error(f"Error streaming query: {str(e)}", exc_info=True)
             return create_standard_response(None, 500, "An error occurred while processing your request.")
 
     return jsonify({'error': 'Invalid input type.'}), 400
 
-
-
 @app.route('/search', methods=['GET', 'POST'])
 @rate_limit
 def search_trends():
     query = request.args.get('q') if request.method == 'GET' else request.json.get('q')
-    
     if not query:
         return create_standard_response({'error': 'Query parameter "q" is required'}, 400, "Query parameter missing")
-
+    
     query = sanitize_input(query)
-    
-    # Run async function synchronously
-    result = asyncio.run(stream_with_loading_messages(query))
-    
-    return Response(stream_with_context(result), content_type='text/event-stream')
 
+    @async_to_sync
+    async def generate_search_response():
+        async for message in stream_with_loading_messages(query):
+            yield message
+
+    return Response(stream_with_context(generate_search_response()), content_type='text/event-stream')
 
 @app.route('/process-query', methods=['POST'])
 @rate_limit
 def process_query():
     try:
         query = request.json.get('q') if request.is_json else request.form.get('q')
-        
         if not query:
             logger.warning("Query is missing")
             return create_standard_response({'error': 'Query is required'}, 400, "Query is required")
-
+        
         query = sanitize_input(query)
 
-        # Extract entities from query using Hugging Face API (run asynchronously)
-        processed_query_data = asyncio.run(extract_entities_with_hf(query))
+        @async_to_sync
+        async def process_query_async():
+            # Extract entities from query using Hugging Face API
+            processed_query_data = await extract_entities_with_hf(query)
+            
+            # Store the query in the database
+            new_query = UserQuery(query=query)
+            new_query.set_hf_data(processed_query_data)
+            db.session.add(new_query)
+            db.session.commit()
+            
+            # Generate trending topics
+            trends = await fetch_trending_topics(query)
+            
+            # Summarize trends
+            summaries = []
+            for trend in trends:
+                title = trend.get('title', '')
+                summary = trend.get('summary', '')
+                full_summary = await summarize_with_hf(f"{title} {summary}")
+                summaries.append(full_summary)
+            
+            # Generate a general summary
+            general_summary = await generate_general_summary(summaries)
+            
+            # Prepare context for BlenderBot
+            context = f"Query: {query}\nTrending topics: {general_summary}"
+            
+            # Generate conversational response using BlenderBot
+            response_stream = await inference_client.chat_completion(
+                messages=[
+                    {"role": "system", "content": "You are an AI assistant helping with trending topics."},
+                    {"role": "user", "content": context}
+                ],
+                stream=True
+            )
+            
+            # Stream the response
+            async for token in response_stream:
+                yield f"data: {token['choices'][0]['delta']['content']}\n\n"
 
-        # Store the query in the database
-        new_query = UserQuery(query=query)
-        new_query.set_hf_data(processed_query_data)
-        db.session.add(new_query)
-        db.session.commit()
-
-        # Run the streaming function asynchronously
-        result = asyncio.run(stream_with_loading_messages(query))
-
-        return Response(stream_with_context(result), content_type='text/event-stream')
-    
+        return Response(stream_with_context(process_query_async()), content_type='text/event-stream')
     except SQLAlchemyError as e:
         logger.error(f"Database error: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "A database error occurred. Please try again later.")
-    
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
-
 
 @app.route('/recent_searches', methods=['GET'])
 @rate_limit
 def recent_searches():
     try:
-        # Fetch recent searches from the database asynchronously
-        recent_queries = asyncio.run(fetch_recent_queries())
+        @async_to_sync
+        async def fetch_recent_searches_async():
+            # Fetch recent searches from the database asynchronously
+            recent_queries = await fetch_recent_queries()
+            for q in recent_queries:
+                yield f"data: {q.query}\n\n"
 
-        # Return the streamed recent searches
-        return Response(stream_with_context((f"data: {q.query}\n\n" for q in recent_queries)), content_type='text/event-stream')
-    
+        return Response(stream_with_context(fetch_recent_searches_async()), content_type='text/event-stream')
     except Exception as e:
         logger.error(f"Error fetching recent searches: {str(e)}", exc_info=True)
         return create_standard_response(None, 500, "An unexpected error occurred. Please try again later.")
-
+        
 # Error handler for unhandled exceptions
 @app.errorhandler(Exception)
 def handle_exception(e):
