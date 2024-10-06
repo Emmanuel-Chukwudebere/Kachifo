@@ -145,6 +145,7 @@ def rate_limit(func):
         return func(*args, **kwargs)
     return wrapper
 
+# request validation
 class InteractSchema(Schema):
     input = fields.Str(required=True, validate=validate.Length(min=1, max=1000))
 
@@ -173,9 +174,10 @@ def validate_request(schema_class):
         return decorated_function
     return decorator
 
+# rate limit per ip
 limiter = Limiter(
-    app,
     key_func=get_remote_address,
+    app=app,
     default_limits=["100 per day", "30 per hour"]
 )
 
