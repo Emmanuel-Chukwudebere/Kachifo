@@ -1,3 +1,5 @@
+psycopg2-binary
+
 # Asynchronous web framework
 quart==            # Quart for handling asynchronous web requests
 
