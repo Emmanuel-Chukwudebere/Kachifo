@@ -26,6 +26,7 @@ Flask
 Flask[async]
 Flask-Caching
 Flask-Cors
+Flask-Limiter
 Flask-SQLAlchemy
 flask_talisman
 google-api-core
@@ -45,6 +46,7 @@ itsdangerous
 Jinja2
 jiter
 MarkupSafe
+marshmallow
 nltk
 praw
 prawcore
