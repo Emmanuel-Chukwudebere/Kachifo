@@ -131,16 +131,15 @@ def log_response_info(response):
 def rate_limit(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        key = "global_rate_limit"
+        key = f"global_rate_limit:{request.remote_addr}"
         remaining_requests = cache.get(key)
         if remaining_requests is None:
             remaining_requests = 60
         elif remaining_requests <= 0:
-            logger.warning("Rate limit exceeded")
+            logger.warning(f"Rate limit exceeded for IP: {request.remote_addr}")
             return create_standard_response(None, 429, "Rate limit exceeded. Please try again later.")
         cache.set(key, remaining_requests - 1, timeout=24 * 3600)
-        response = func(*args, **kwargs)
-        return response
+        return func(*args, **kwargs)
     return wrapper
 
 # Input sanitization and classification
