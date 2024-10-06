@@ -16,10 +16,13 @@ const scrollToBottom = () => {
 };
 
 // Function to format message with URLs embedded in [""] instead of "Read more"
+// Preserve special characters in URLs
 function formatMessageWithLinks(message) {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     return message.replace(urlRegex, (url) => {
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer">[""]</a>`;
+        // Use encodeURI to preserve special characters
+        const sanitizedUrl = encodeURI(url);
+        return `<a href="${sanitizedUrl}" target="_blank" rel="noopener noreferrer">[""]</a>`;
     });
 }
 
@@ -55,9 +58,11 @@ function createChatBubble(sender, isTyping = false) {
 }
 
 // Function to handle streaming responses
-function startStreaming(message, typingBubble) {
-    console.log("Starting to stream for message:", message);
-    const eventSource = new EventSource(`/interact?input=${encodeURIComponent(message)}`);
+function startStreaming(typingBubble) {
+    console.log("Starting to stream");
+
+    // Using EventSource without query parameters, as input is already sent via POST
+    const eventSource = new EventSource(`/interact`);
 
     eventSource.onopen = function(event) {
         console.log("EventSource connection opened");
@@ -69,14 +74,14 @@ function startStreaming(message, typingBubble) {
         try {
             const data = JSON.parse(event.data);
             if (data.error) {
-                typingBubble.innerHTML = `<p class="error-message">${data.error}</p>`;
+                typingBubble.innerHTML = `<p class="error-message">${DOMPurify.sanitize(data.error)}</p>`;
                 eventSource.close();
             } else if (data.results) {
                 const combinedResponse = data.results.map(item => `
                     <div class="result-item">
-                        <h3>${item.title}</h3>
-                        <p>${item.summary}</p>
-                        <a href="${item.url}" target="_blank" rel="noopener noreferrer">[""]</a>
+                        <h3>${DOMPurify.sanitize(item.title)}</h3>
+                        <p>${DOMPurify.sanitize(item.summary)}</p>
+                        <a href="${DOMPurify.sanitize(encodeURI(item.url))}" target="_blank" rel="noopener noreferrer">[""]</a>
                     </div>
                 `).join('');
 
@@ -107,7 +112,7 @@ function startStreaming(message, typingBubble) {
             }
         } catch (error) {
             console.error('Error parsing event data:', error);
-            typingBubble.innerHTML = `<p class="error-message">Error processing response. Please try again.</p>`;
+            typingBubble.innerHTML = `<p class="error-message">${DOMPurify.sanitize('Error processing response. Please try again.')}</p>`;
             eventSource.close();
         }
 
@@ -116,7 +121,7 @@ function startStreaming(message, typingBubble) {
 
     eventSource.onerror = function (error) {
         console.error('EventSource failed:', error);
-        typingBubble.innerHTML = `<p class="error-message">I'm sorry, something went wrong while fetching the data.</p>`;
+        typingBubble.innerHTML = `<p class="error-message">${DOMPurify.sanitize('I\'m sorry, something went wrong while fetching the data.')}</p>`;
         eventSource.close();
     };
 }
@@ -130,7 +135,8 @@ async function sendMessage(message) {
 
     if (message === '') return;
 
-    createChatBubble('user').innerHTML = formatMessageWithLinks(message);
+    // Add user's message to the chat window
+    createChatBubble('user').innerHTML = formatMessageWithLinks(DOMPurify.sanitize(message));
     userInput.value = '';
     userInput.style.height = 'auto';
     initialView.classList.add('hidden');
@@ -140,6 +146,7 @@ async function sendMessage(message) {
     const typingBubble = createChatBubble('kachifo', true);
 
     try {
+        // Send POST request to server with user's message
         const response = await fetch('/interact', {
             method: 'POST',
             headers: {
@@ -151,11 +158,12 @@ async function sendMessage(message) {
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
-        startStreaming(message, typingBubble);
+
+        // Start streaming response from server after successful POST
+        startStreaming(typingBubble);
     } catch (error) {
         console.error('Error:', error);
-        typingBubble.innerHTML = `<p class="error-message">I'm sorry, something went wrong. Please try again.</p>`;
+        typingBubble.innerHTML = `<p class="error-message">${DOMPurify.sanitize('Something went wrong. Please try again.')}</p>`;
     }
 }
 
