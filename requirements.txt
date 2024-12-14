@@ -2,7 +2,7 @@ psycopg2-binary
 aiocache
 
 # Asynchronous web framework
-quart                     # Quart for handling asynchronous web requests
+flask                     # flask for handling asynchronous web requests
 
 # HTTP libraries
 aiohttp                   # For making asynchronous HTTP requests
@@ -29,12 +29,12 @@ google-api-core          # Core libraries for Google API
 google-api-python-client  # Client library for Google APIs
 google-auth              # Authentication for Google services
 
-# quart-related libraries that may still be useful
-# quart-Cache             # For caching support, ensure compatibility with Quart
-quart-Cors                # For handling Cross-Origin Resource Sharing
-# quart-Limiter             # Rate limiting, check for Quart compatibility
-quart-SQLAlchemy          # For SQLAlchemy support; you can use SQLAlchemy directly with Quart
-quart_talisman            # Security features; consider using alternative security features in Quart
+# flask-related libraries that may still be useful
+# flask-Cache             # For caching support, ensure compatibility with flask
+flask-Cors                # For handling Cross-Origin Resource Sharing
+# flask-Limiter             # Rate limiting, check for flask compatibility
+flask-SQLAlchemy          # For SQLAlchemy support; you can use SQLAlchemy directly with flask
+flask_talisman            # Security features; consider using alternative security features in flask
 
 # Authentication libraries
 requests                  # For making HTTP requests
@@ -46,7 +46,7 @@ html2text                 # For converting HTML to plain text
 nltk                     # Natural Language Toolkit
 datasets                  # For working with datasets
 cryptography              # For cryptographic operations
-gunicorn                  # WSGI HTTP server; optional if using with Quart
+gunicorn                  # WSGI HTTP server; optional if using with flask
 sqlalchemy                # ORM for database interaction
 psycopg2                 # PostgreSQL adapter
 psycopg2-binary          # Binary package for psycopg2
@@ -55,7 +55,7 @@ PyMySQL                  # MySQL adapter if needed
 # Development utilities
 python-dotenv             # For loading environment variables
 sentry-sdk                # For error tracking and monitoring
-Werkzeug                  # May still be needed for some utilities; check Quart documentation
+Werkzeug                  # May still be needed for some utilities; check flask documentation
 
 # Other libraries
 aioflask                 # For integrating Flask's features with async functionality
