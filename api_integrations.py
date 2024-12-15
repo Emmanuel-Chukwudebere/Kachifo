@@ -1,414 +1,169 @@
 import os
 import logging
-import asyncio
-import aiohttp
-from aiohttp import ClientError, ClientTimeout
-from aiocache import cached, Cache
-from aiocache.serializers import PickleSerializer
-from functools import wraps
-from dotenv import load_dotenv
-from typing import List, Dict, Any, Optional
-from huggingface_hub import InferenceClient
-import asyncpraw
 import time
+from requests.exceptions import RequestException
+from cachetools import TTLCache
+from googleapiclient.discovery import build
+from youtube_transcript_api import YouTubeTranscriptApi
+from huggingface_hub import InferenceClient
+from dotenv import load_dotenv
+import praw
+import requests
 from requests_oauthlib import OAuth1
-from requests.exceptions import RequestException, Timeout
 
-# Load environment variables
+# Load Environment Variables
 load_dotenv()
+HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
+TWITTER_API_KEY = os.getenv('TWITTER_API_KEY')
+TWITTER_API_SECRET_KEY = os.getenv('TWITTER_API_SECRET_KEY')
+TWITTER_ACCESS_TOKEN = os.getenv('TWITTER_ACCESS_TOKEN')
+TWITTER_ACCESS_TOKEN_SECRET = os.getenv('TWITTER_ACCESS_TOKEN_SECRET')
+REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID')
+REDDIT_SECRET = os.getenv('REDDIT_SECRET')
+REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT')
+HF_SUMMARY_MODEL = "facebook/bart-large-cnn"
+HF_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"
+HF_BOT_MODEL = "facebook/blenderbot-400M-distill"
+HF_QA_MODEL = "deepset/roberta-base-squad2"
+HF_SENTIMENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment"
 
-# Initialize logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Initialize Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# API keys from environment variables
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
-NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
-TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
-TWITTER_API_SECRET_KEY = os.getenv("TWITTER_API_SECRET_KEY")
-TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-TWITTER_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-REDDIT_SECRET = os.getenv("REDDIT_SECRET")
-REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
+# Initialize Cache
+cache = TTLCache(maxsize=1000, ttl=3600)
 
-# Hugging Face API keys and models
-HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
-HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"
-HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"
-HF_API_BOT_MODEL = "facebook/blenderbot-400M-distill"
+# Hugging Face API Clients
+summary_client = InferenceClient(model=HF_SUMMARY_MODEL, token=HF_API_KEY)
+ner_client = InferenceClient(model=HF_NER_MODEL, token=HF_API_KEY)
+bot_client = InferenceClient(model=HF_BOT_MODEL, token=HF_API_KEY)
+qa_client = InferenceClient(model=HF_QA_MODEL, token=HF_API_KEY)
+sentiment_client = InferenceClient(model=HF_SENTIMENT_MODEL, token=HF_API_KEY)
 
-# Initialize the InferenceClient for summarization, NER, and BlenderBot
-inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
-inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
-inference_bot = InferenceClient(model=HF_API_BOT_MODEL, token=HF_API_KEY)
+# Google API Client
+google_client = build("customsearch", "v1", developerKey=GOOGLE_API_KEY)
 
-# Initialize aiocache
-cache = Cache(Cache.MEMORY, serializer=PickleSerializer())
+# Reddit Client
+reddit_client = praw.Reddit(
+    client_id=REDDIT_CLIENT_ID,
+    client_secret=REDDIT_SECRET,
+    user_agent=REDDIT_USER_AGENT
+)
 
-# Rate limit configuration
-def rate_limited(max_per_second: float):
-    """Limits the number of API calls per second."""
-    min_interval = 1.0 / max_per_second
-    last_called = [0.0]
+# Twitter OAuth1 Session
+twitter_auth = OAuth1(
+    TWITTER_API_KEY, TWITTER_API_SECRET_KEY,
+    TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET
+)
 
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            elapsed = time.time() - last_called[0]
-            wait_time = min_interval - elapsed
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
-            last_called[0] = time.time()
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+# Utility Function: Retry with Exponential Backoff
+def retry_with_backoff(func, retries=3, delay=2):
+    """Retries a function with exponential backoff."""
+    for attempt in range(retries):
+        try:
+            return func()
+        except RequestException as e:
+            if attempt < retries - 1:
+                logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying...")
+                time.sleep(delay * (2 ** attempt))
+            else:
+                logger.error(f"All attempts failed: {e}")
+                raise
 
-# Retry logic with exponential backoff
-def retry_with_backoff(exceptions, tries=3, delay=2, backoff=2):
-    """Retry decorator for functions in case of failure."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            _tries, _delay = tries, delay
-            while _tries > 1:
-                try:
-                    return await func(*args, **kwargs)
-                except exceptions as e:
-                    logger.warning(f"{func.__name__} failed due to {str(e)}, retrying in {_delay} seconds...")
-                    await asyncio.sleep(_delay)
-                    _tries -= 1
-                    _delay *= backoff
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+# Hugging Face Integrations
+def summarize_text(text):
+    """Summarizes text using Hugging Face API."""
+    if text in cache:
+        logger.info("Cache hit for summarization.")
+        return cache[text]
 
-# General summary from individual summaries
-@cached(ttl=3600, key_builder=lambda *args, **kwargs: f"general_summary:{args[0]}")
-async def generate_general_summary(individual_summaries: List[str]) -> str:
-    """Generates a general summary using Hugging Face Hub API from individual summaries."""
-    combined_text = " ".join(individual_summaries)
     try:
-        logger.info("Calling Hugging Face Summarization API for general summary")
-        response = await inference_summary.summarization(combined_text,
-                                                         parameters={"max_length": 200, "min_length": 100, "do_sample": False})
-        general_summary = response.get('summary_text', "No summary available")
-        return general_summary
-    except Exception as e:
-        logger.error(f"Error generating general summary: {str(e)}")
-        return "Sorry, I couldn't generate a summary at the moment."
-
-# Summarize with Hugging Face
-@rate_limited(max_per_second=1.0)
-@retry_with_backoff((ClientError, asyncio.TimeoutError), tries=3)
-@cached(ttl=3600, key_builder=lambda *args, **kwargs: f"summary:{args[0][:100]}")
-async def summarize_with_hf(text: str) -> str:
-    """Summarizes text using Hugging Face Hub API with caching and logging."""
-    try:
-        logger.info(f"Calling Hugging Face Summarization API for text: {text[:100]}...")
-        max_input_length = 1024  # Adjust this value based on your model's requirements
-        truncated_text = text[:max_input_length]
-        response = await inference_summary.summarization(truncated_text,
-                                                         parameters={"max_length": 150, "min_length": 50, "do_sample": False})
+        logger.info("Calling Hugging Face Summarization API.")
+        response = summary_client.summarization(text, parameters={"max_length": 150, "min_length": 50})
         summary = response.get('summary_text', "No summary available")
-        logger.info(f"Summary generated: {summary[:100]}...")
+        cache[text] = summary
         return summary
     except Exception as e:
-        logger.error(f"Error calling Hugging Face Summarization API: {str(e)}")
-        return "Sorry, summarization is unavailable at the moment."
+        logger.error(f"Error during summarization: {e}")
+        return "Summarization unavailable."
 
-# Extract named entities with Hugging Face
-@rate_limited(max_per_second=1.0)
-@retry_with_backoff((ClientError, asyncio.TimeoutError), tries=3)
-@cached(ttl=3600, key_builder=lambda *args, **kwargs: f"ner:{args[0][:100]}")
-async def extract_entities_with_hf(text: str) -> Dict[str, Any]:
-    """Extracts named entities using Hugging Face Hub API with caching and logging."""
+# Additional Integrations
+def fetch_google_results(query):
+    """Fetches search results from Google."""
     try:
-        logger.info(f"Calling Hugging Face NER API for text: {text[:100]}...")
-        max_input_length = 512  # Adjust this value based on your model's requirements
-        truncated_text = text[:max_input_length]
-        response = await inference_ner.token_classification(truncated_text)
-        entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
-        logger.info(f"Entities extracted: {entities}")
-        return {"entities": entities}
+        logger.info(f"Fetching Google results for query: {query}")
+        response = google_client.cse().list(q=query, cx="your_cse_id", num=5).execute()
+        return response.get('items', [])
     except Exception as e:
-        logger.error(f"Error calling Hugging Face NER API: {str(e)}")
-        return {"entities": []}
-
-# Generate a conversational response using BlenderBot
-@rate_limited(max_per_second=1.0)
-@retry_with_backoff((ClientError, asyncio.TimeoutError), tries=3)
-async def generate_conversational_response(user_input: str) -> str:
-    """Generate a conversational response using Hugging Face API."""
-    try:
-        logger.info(f"Generating conversational response for input: {user_input[:100]}...")
-        response = await inference_bot.chat_completion(messages=[{"role": "user", "content": user_input}], stream=False)
-        generated_response = response.get('choices', [{}])[0].get('message', {}).get('content', "No response available")
-        logger.info(f"Conversational response generated: {generated_response[:100]}...")
-        return generated_response
-    except Exception as e:
-        logger.error(f"Error generating conversational response: {str(e)}")
-        return "I'm sorry, I couldn't respond to that."
-
-# Fetch YouTube trends
-@rate_limited(1.0)
-@retry_with_backoff((ClientError, asyncio.TimeoutError), tries=3)
-@cached(ttl=600, key_builder=lambda *args, **kwargs: f"youtube:{args[0]}")
-async def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
-    url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&type=video&maxResults=3&key={YOUTUBE_API_KEY}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=ClientTimeout(total=10)) as response:
-                response.raise_for_status()
-                result = await response.json()
-                return [
-                    {
-                        "source": "YouTube",
-                        "title": item['snippet']['title'],
-                        "url": f"https://www.youtube.com/watch?v={item['id']['videoId']}",
-                        "summary": await summarize_with_hf(item['snippet']['description'])
-                    }
-                    for item in result.get('items', [])
-                ]
-    except Exception as e:
-        logger.error(f"Error fetching YouTube trends: {str(e)}")
+        logger.error(f"Error during Google search: {e}")
         return []
 
-# Fetch Twitter trends
-@rate_limited(1.0)
-@retry_with_backoff((ClientError, asyncio.TimeoutError), tries=3)
-@cached(ttl=600, key_builder=lambda *args, **kwargs: f"twitter:{args[0]}")
-async def fetch_twitter_trends(query: str) -> List[Dict[str, Any]]:
-    url = f"https://api.twitter.com/2/tweets/search/recent?query={query}&max_results=3"
-    auth = OAuth1(TWITTER_API_KEY, TWITTER_API_SECRET_KEY, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET)
+def fetch_youtube_results(query):
+    """Fetches YouTube videos for a query."""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, auth=auth, timeout=ClientTimeout(total=10)) as response:
-                response.raise_for_status()
-                result = await response.json()
-                return [
-                    {
-                        "source": "Twitter",
-                        "title": tweet.get('text'),
-                        "url": f"https://twitter.com/statuses/{tweet.get('id')}",
-                        "summary": await summarize_with_hf(tweet.get('text'))
-                    }
-                    for tweet in result.get('data', [])
-                ]
+        url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&type=video&maxResults=3&key={YOUTUBE_API_KEY}"
+        response = requests.get(url).json()
+        return [
+            {
+                "title": item['snippet']['title'],
+                "url": f"https://www.youtube.com/watch?v={item['id']['videoId']}",
+                "summary": summarize_text(item['snippet']['description'])
+            }
+            for item in response.get('items', [])
+        ]
     except Exception as e:
-        logger.error(f"Error fetching Twitter trends: {str(e)}")
+        logger.error(f"Error fetching YouTube data: {e}")
         return []
 
-# Fetch Google search results
-@rate_limited(1.0)
-@retry_with_backoff((ClientError, asyncio.TimeoutError), tries=3)
-@cached(ttl=600, key_builder=lambda *args, **kwargs: f"google:{args[0]}")
-async def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
-    url = f"https://www.googleapis.com/customsearch/v1?q={query}&cx={GOOGLE_CSE_ID}&key={GOOGLE_API_KEY}"
+def fetch_reddit_results(query):
+    """Fetches top Reddit posts for a query."""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=ClientTimeout(total=10)) as response:
-                response.raise_for_status()
-                result = await response.json()
-                return [
-                    {
-                        "source": "Google",
-                        "title": item.get("title"),
-                        "url": item.get("link"),
-                        "summary": await summarize_with_hf(item.get("snippet", ""))
-                    }
-                    for item in result.get('items', [])
-                ]
+        results = []
+        for submission in reddit_client.subreddit("all").search(query, sort="top", limit=3):
+            results.append({
+                "title": submission.title,
+                "url": submission.url,
+                "summary": summarize_text(submission.selftext[:500])
+            })
+        return results
     except Exception as e:
-        logger.error(f"Error fetching Google trends: {str(e)}")
+        logger.error(f"Error fetching Reddit data: {e}")
         return []
 
-# Fetch Reddit trends
-@rate_limited(1.0)
-@retry_with_backoff((ClientError, asyncio.TimeoutError), tries=3)
-@cached(ttl=600, key_builder=lambda *args, **kwargs: f"reddit:{args[0]}")
-async def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
+def fetch_twitter_results(query):
+    """Fetches recent tweets for a query."""
     try:
-        async with asyncpraw.Reddit(
-            client_id=REDDIT_CLIENT_ID,
-            client_secret=REDDIT_SECRET,
-            user_agent=REDDIT_USER_AGENT
-        ) as reddit:
-            results = []
-            subreddit = await reddit.subreddit("all")
-            async for submission in subreddit.search(query, sort="top", limit=3):
-                post_title = submission.title
-                post_url = submission.url
-                post_content = submission.selftext[:500]
-                summary = await summarize_with_hf(post_content)
-                results.append({
-                    "source": "Reddit",
-                    "title": post_title,
-                    "url": post_url,
-                    "summary": summary
-                })
-            return results
+        url = f"https://api.twitter.com/2/tweets/search/recent?query={query}&max_results=3"
+        response = requests.get(url, auth=twitter_auth).json()
+        return [
+            {
+                "text": tweet['text'],
+                "url": f"https://twitter.com/i/web/status/{tweet['id']}"
+            }
+            for tweet in response.get('data', [])
+        ]
     except Exception as e:
-        logger.error(f"Error fetching Reddit trends: {str(e)}")
+        logger.error(f"Error fetching Twitter data: {e}")
         return []
 
-# Fetch News articles
-@rate_limited(1.0)
-@retry_with_backoff((ClientError, asyncio.TimeoutError), tries=3)
-@cached(ttl=600, key_builder=lambda *args, **kwargs: f"news:{args[0]}")
-async def fetch_news_articles(query: str) -> List[Dict[str, Any]]:
-    url = f"https://newsapi.org/v2/everything?q={query}&apiKey={NEWSAPI_KEY}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=ClientTimeout(total=10)) as response:
-                response.raise_for_status()
-                result = await response.json()
-                return [
-                    {
-                        "source": "News API",
-                        "title": article.get("title"),
-                        "url": article.get("url"),
-                        "summary": await summarize_with_hf(article.get("description", ""))
-                    }
-                    for article in result.get('articles', [])[:3]  # Limit to top 3 articles
-                ]
-    except Exception as e:
-        logger.error(f"Error fetching news articles: {str(e)}")
-        return []
-
-# Fetch all trends from APIs (YouTube, Reddit, Twitter, Google, News)
-async def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
-    """Fetch trends from YouTube, Reddit, Google, Twitter, and News."""
-    tasks = [
-        fetch_youtube_trends(query),
-        fetch_reddit_trends(query),
-        fetch_twitter_trends(query),
-        fetch_google_trends(query),
-        fetch_news_articles(query)
-    ]
-    
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    all_results = []
-    for result in results:
-        if isinstance(result, Exception):
-            logger.error(f"An API request failed: {str(result)}")
-        elif isinstance(result, list):
-            all_results.extend(result)
-    
-    return all_results
-
-# Utility function to clean and validate query
-def clean_query(query: str) -> str:
-    """Clean and validate the query string."""
-    # Remove any non-alphanumeric characters except spaces
-    cleaned_query = re.sub(r'[^\w\s]', '', query)
-    # Trim leading/trailing whitespace and convert to lowercase
-    cleaned_query = cleaned_query.strip().lower()
-    # Ensure the query is not empty and not too long
-    if not cleaned_query:
-        raise ValueError("Query cannot be empty")
-    if len(cleaned_query) > 100:
-        cleaned_query = cleaned_query[:100]
-    return cleaned_query
-
-# Error handling decorator
-def handle_errors(func):
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        try:
-            return await func(*args, **kwargs)
-        except aiohttp.ClientError as e:
-            logger.error(f"Network error in {func.__name__}: {str(e)}")
-            return []
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout error in {func.__name__}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error in {func.__name__}: {str(e)}")
-            return []
-    return wrapper
-
-# Apply error handling to all API fetch functions
-fetch_youtube_trends = handle_errors(fetch_youtube_trends)
-fetch_reddit_trends = handle_errors(fetch_reddit_trends)
-fetch_twitter_trends = handle_errors(fetch_twitter_trends)
-fetch_google_trends = handle_errors(fetch_google_trends)
-fetch_news_articles = handle_errors(fetch_news_articles)
-
-# Main function to get trending topics
-async def get_trending_topics(query: str) -> Dict[str, Any]:
-    """Main function to get trending topics from all sources."""
-    try:
-        cleaned_query = clean_query(query)
-    except ValueError as e:
-        logger.error(f"Invalid query: {str(e)}")
-        return {"error": str(e)}
-
-    trends = await fetch_trending_topics(cleaned_query)
-    
-    if not trends:
-        return {"error": "No trends found or all API requests failed"}
-
-    # Generate a general summary of all trends
-    all_summaries = [trend['summary'] for trend in trends if trend.get('summary')]
-    general_summary = await generate_general_summary(all_summaries)
+def fetch_trending_topics(query):
+    """Aggregates trends from multiple sources."""
+    google_results = fetch_google_results(query)
+    youtube_results = fetch_youtube_results(query)
+    reddit_results = fetch_reddit_results(query)
+    twitter_results = fetch_twitter_results(query)
 
     return {
-        "query": cleaned_query,
-        "trends": trends,
-        "general_summary": general_summary
+        "google": google_results,
+        "youtube": youtube_results,
+        "reddit": reddit_results,
+        "twitter": twitter_results
     }
 
-# Asynchronous context manager for aiohttp ClientSession
-@asynccontextmanager
-async def get_session():
-    session = aiohttp.ClientSession()
-    try:
-        yield session
-    finally:
-        await session.close()
-
-# Initialize cache
-async def init_cache():
-    global cache
-    cache = Cache(Cache.MEMORY, serializer=PickleSerializer())
-    await cache.init()
-
-# Shutdown function to clean up resources
-async def shutdown():
-    await cache.close()
-    # Add any other cleanup tasks here
-
-# Health check function
-async def health_check() -> Dict[str, str]:
-    """Perform a health check on all API integrations."""
-    health_status = {}
-    apis = [
-        ("YouTube", fetch_youtube_trends),
-        ("Reddit", fetch_reddit_trends),
-        ("Twitter", fetch_twitter_trends),
-        ("Google", fetch_google_trends),
-        ("NewsAPI", fetch_news_articles)
-    ]
-
-    for api_name, api_func in apis:
-        try:
-            result = await api_func("test")
-            health_status[api_name] = "OK" if result else "No data returned"
-        except Exception as e:
-            health_status[api_name] = f"Error: {str(e)}"
-
-    return health_status
-
 if __name__ == "__main__":
-    async def main():
-        await init_cache()
-        query = input("Enter a query to search for trending topics: ")
-        result = await get_trending_topics(query)
-        print(json.dumps(result, indent=2))
-        await shutdown()
-
-    asyncio.run(main())
+    query = "Artificial Intelligence"
+    trends = fetch_trending_topics(query)
+    print(trends)
