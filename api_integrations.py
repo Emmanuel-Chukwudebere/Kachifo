@@ -209,7 +209,7 @@ class NewsAPI:
             'source': 'NewsAPI'
         } for article in data.get('articles', [])]
         
-class RedditAPI:
+""" class RedditAPI:
     """RedditAPI Integration"""
     @api_error_handler
     @ttl_cache(3600)
@@ -226,7 +226,7 @@ class RedditAPI:
         return results
     except Exception as e:
         logger.error(f"Reddit API error: {str(e)}")
-        return []
+        return [] """
 
 # Main functions for external use
 def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
