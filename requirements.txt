@@ -5,6 +5,7 @@ google-api-python-client
 
 # Asynchronous web framework
 flask                     # flask for handling asynchronous web requests
+flask-caching
 
 # HTTP libraries
 aiohttp                   # For making asynchronous HTTP requests
