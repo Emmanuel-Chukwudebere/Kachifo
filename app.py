@@ -1,42 +1,48 @@
+# app.py
 import os
 import logging
 import json
 import re
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
+from flask_caching import Cache
 from flask_talisman import Talisman
 from functools import wraps
-from werkzeug.exceptions import HTTPException
-from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf
+from werkzeug.exceptions import HTTPException, BadRequest
+from api_integrations import fetch_trending_topics, summarize_with_hf, extract_entities_with_hf, generate_conversational_response
 from logging.handlers import RotatingFileHandler
 from huggingface_hub import InferenceClient
 
-# Initialize Flask app
+# Initialize Flask app with enhanced security and performance configurations
 app = Flask(__name__)
 
 # Security: Use Flask-Talisman to enforce HTTPS and set secure headers
 Talisman(app, content_security_policy={
     'default-src': ["'self'", 'https:'],
-    'script-src': ["'self'", 'https:'],
-    'style-src': ["'self'", 'https:'],
-    'img-src': ["'self'", 'data:'],
-    'connect-src': ["'self'", 'https:']
+    'script-src': ["'self'", 'https:', "'unsafe-inline'"],  # Allow inline scripts for streaming
+    'style-src': ["'self'", 'https:', "'unsafe-inline'"],
+    'img-src': ["'self'", 'data:', 'https:'],
+    'connect-src': ["'self'", 'https:', 'wss:']  # Allow WebSocket connections
 })
+
+# Caching configuration - Using simple cache instead of database
+app.config['CACHE_TYPE'] = 'simple'
+app.config['CACHE_DEFAULT_TIMEOUT'] = 300
+cache = Cache(app)
 
 # Initialize Hugging Face Client
 inference_client = InferenceClient(token=os.getenv("HUGGINGFACE_API_KEY"))
 
-# Setup logging
+# Setup logging with enhanced error tracking
 def setup_logging():
     log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
     log_file = os.environ.get('LOG_FILE', 'kachifo.log')
-    
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
     file_handler = RotatingFileHandler(
         log_file, 
-        maxBytes=10 * 1024 * 1024,
+        maxBytes=10 * 1024 * 1024,  # 10MB
         backupCount=5
     )
     file_handler.setFormatter(formatter)
@@ -52,98 +58,62 @@ logger = logging.getLogger(__name__)
 # Helper function for standardized responses
 def create_standard_response(data, status_code, message):
     """
-    Creates a standardized API response format.
+    Creates a standardized JSON response format
     
     Args:
-        data: The payload to be returned to the client
+        data: The payload to be sent
         status_code (int): HTTP status code
-        message (str): Human-readable message describing the response
+        message (str): Response message
         
     Returns:
-        tuple: (response_dict, status_code)
+        tuple: JSON response and status code
     """
     response = {
         "data": data,
         "status": status_code,
         "message": message
     }
-    return response, status_code
-
-# Rate limiting using in-memory storage
-class RateLimit:
-    """
-    Simple in-memory rate limiting implementation.
-    For production, consider using Redis or a similar distributed cache.
-    """
-    def __init__(self, requests_per_minute=60):
-        self.requests = {}
-        self.limit = requests_per_minute
-        self.cleanup_counter = 0
-    
-    def is_allowed(self, ip):
-        current_time = time.time()
-        self.cleanup_counter += 1
-        
-        # Cleanup old entries every 100 requests
-        if self.cleanup_counter >= 100:
-            self._cleanup(current_time)
-            self.cleanup_counter = 0
-        
-        # Initialize or get existing window
-        if ip not in self.requests:
-            self.requests[ip] = []
-        
-        # Remove requests older than 1 minute
-        self.requests[ip] = [t for t in self.requests[ip] 
-                           if current_time - t < 60]
-        
-        # Check if limit is exceeded
-        if len(self.requests[ip]) >= self.limit:
-            return False
-        
-        # Add new request
-        self.requests[ip].append(current_time)
-        return True
-    
-    def _cleanup(self, current_time):
-        """Remove entries older than 1 minute to prevent memory growth"""
-        for ip in list(self.requests.keys()):
-            if all(current_time - t >= 60 for t in self.requests[ip]):
-                del self.requests[ip]
-
-rate_limiter = RateLimit()
+    return jsonify(response), status_code
 
 # Rate limiting middleware
 def rate_limit(func):
     """
-    Decorator to apply rate limiting to routes.
-    Uses client IP address for tracking request frequency.
+    Decorator to implement rate limiting using cache
+    Limits to 60 requests per hour per IP
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
-        client_ip = request.remote_addr
+        if request.headers.get('X-Real-IP'):
+            key = f"rate_limit_{request.headers['X-Real-IP']}"
+        else:
+            key = f"rate_limit_{request.remote_addr}"
+            
+        remaining_requests = cache.get(key)
         
-        if not rate_limiter.is_allowed(client_ip):
-            logger.warning(f"Rate limit exceeded for IP: {client_ip}")
+        if remaining_requests is None:
+            remaining_requests = 60
+        elif remaining_requests <= 0:
+            logger.warning(f"Rate limit exceeded for IP: {key}")
             return create_standard_response(
                 None, 
                 429, 
                 "Rate limit exceeded. Please try again later."
             )
             
+        cache.set(key, remaining_requests - 1, timeout=3600)  # 1 hour timeout
         return func(*args, **kwargs)
     return wrapper
 
-# Input processing
+# Input sanitization and classification
 def sanitize_input(query):
     """
-    Sanitizes user input by removing special characters and excess whitespace.
+    Sanitizes user input by removing special characters and excess whitespace
     
     Args:
         query (str): Raw user input
         
     Returns:
-        str: Sanitized input string
+        str: Sanitized input
     """
     sanitized = re.sub(r"[^\w\s]", "", query).strip()
     logger.info(f"Sanitized input: {sanitized}")
@@ -151,7 +121,7 @@ def sanitize_input(query):
 
 def classify_input_type(user_input):
     """
-    Determines whether the input is a search query or conversational.
+    Classifies input as either a query or conversation
     
     Args:
         user_input (str): User's input text
@@ -165,120 +135,83 @@ def classify_input_type(user_input):
     )
     return 'query' if query_pattern.search(user_input) else 'conversation'
 
-# Request logging middleware
-@app.before_request
-def log_request_info():
-    """Logs incoming request details for monitoring and debugging"""
-    logger.info(f'Request: {request.method} {request.url}')
-    logger.debug(f'Headers: {request.headers}')
-    if request.is_json:
-        logger.debug(f'Body: {request.get_json()}')
-
-@app.after_request
-def log_response_info(response):
-    """Logs response details and adds security headers"""
-    logger.info(f'Response: {response.status}')
-    logger.debug(f'Headers: {response.headers}')
-    
-    # Add security headers
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    
-    return response
-
 # Routes
 @app.route('/')
 def home():
-    """Serves the main application page"""
+    """Renders the home page"""
     logger.info("Home page accessed")
     return render_template('index.html', message="Welcome to Kachifo - Discover trends")
 
-@app.route('/interact', methods=['GET', 'POST'])
+@app.route('/interact', methods=['POST'])
 @rate_limit
-async def interact():
+def interact():
     """
-    Main interaction endpoint handling both query and conversational inputs.
-    
-    Returns:
-        JSON response containing either search results or conversational response
+    Main interaction endpoint handling both queries and conversations
+    Returns complete response for frontend streaming
     """
     try:
-        user_input = request.json.get('input') if request.method == 'POST' else request.args.get('input')
-        
+        user_input = request.json.get('input')
         if not user_input:
             return create_standard_response(
                 {'error': 'No input provided.'}, 
                 400, 
-                "Missing input parameter"
+                "Missing input"
             )
 
         input_type = classify_input_type(user_input)
-        sanitized_input = sanitize_input(user_input)
-
+        
+        # Handle conversational input
         if input_type == 'conversation':
-            # Handle conversational input with HuggingFace
-            response = await inference_client.chat_completion(
-                messages=[{"role": "user", "content": sanitized_input}],
-                model="facebook/blenderbot-400M-distill"
-            )
-            return create_standard_response(
-                response.get('choices', [{}])[0].get('message', {}).get('content'),
-                200,
-                "Conversation response generated successfully"
-            )
+            response = generate_conversational_response(user_input)
+            return jsonify({
+                'type': 'conversation',
+                'response': response
+            })
             
-        else:  # Handle query-type input
-            results = await fetch_trending_topics(sanitized_input)
+        # Handle query input
+        elif input_type == 'query':
+            trends = fetch_trending_topics(user_input)
+            processed_trends = []
             
-            # Process and summarize results
-            processed_results = []
-            for result in results:
-                summary = await summarize_with_hf(
-                    f"{result.get('title', '')} {result.get('summary', '')}"
+            for trend in trends:
+                summary = summarize_with_hf(
+                    f"{trend.get('title', '')} {trend.get('description', '')}"
                 )
-                processed_results.append({
-                    'source': result.get('source', ''),
-                    'title': result.get('title', ''),
+                processed_trends.append({
+                    'source': trend.get('source', ''),
+                    'title': trend.get('title', ''),
                     'summary': summary,
-                    'url': result.get('url', '')
+                    'url': trend.get('url', '')
                 })
-
-            return create_standard_response(
-                {
-                    'query': sanitized_input,
-                    'results': processed_results
-                },
-                200,
-                "Search results generated successfully"
-            )
-
+                
+            return jsonify({
+                'type': 'query',
+                'query': user_input,
+                'results': processed_trends
+            })
+            
     except Exception as e:
         logger.error(f"Error in interact endpoint: {str(e)}", exc_info=True)
         return create_standard_response(
-            None,
-            500,
+            None, 
+            500, 
             "An unexpected error occurred. Please try again later."
         )
 
-# Error handling
+# Error handler for unhandled exceptions
 @app.errorhandler(Exception)
 def handle_exception(e):
     """Global error handler for all unhandled exceptions"""
     if isinstance(e, HTTPException):
-        return create_standard_response(None, e.code, str(e))
+        return e
         
     logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
     return create_standard_response(
-        None,
-        500,
+        None, 
+        500, 
         "An unexpected error occurred. Please try again later."
     )
 
 if __name__ == '__main__':
-    # Initialize the application
     port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('FLASK_ENV') == 'development'
-    
-    logger.info(f"Starting application on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(host='0.0.0.0', port=port)
