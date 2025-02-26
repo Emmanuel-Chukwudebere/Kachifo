@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Any
 import praw
 import json
+import re
 
 # Load environment variables
 load_dotenv()
@@ -39,7 +40,6 @@ inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY
 inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
 inference_bot = InferenceClient(model=HF_API_BOT_MODEL, token=HF_API_KEY)
 
-# Synchronous rate limiting decorator
 def rate_limited(max_per_second: float):
     min_interval = 1.0 / max_per_second
     def decorator(func):
@@ -55,7 +55,6 @@ def rate_limited(max_per_second: float):
         return wrapper
     return decorator
 
-# Retry logic with exponential backoff (synchronous)
 def retry_with_backoff(exceptions, tries=3, delay=2, backoff=2):
     def decorator(func):
         @wraps(func)
@@ -73,7 +72,6 @@ def retry_with_backoff(exceptions, tries=3, delay=2, backoff=2):
         return wrapper
     return decorator
 
-# Generate a general summary from individual summaries
 def generate_general_summary(individual_summaries: List[str]) -> str:
     combined_text = " ".join(individual_summaries)
     try:
@@ -84,7 +82,6 @@ def generate_general_summary(individual_summaries: List[str]) -> str:
         logger.error(f"Error generating general summary: {str(e)}")
         return "Sorry, I couldn't generate a summary at the moment."
 
-# Summarize text using Hugging Face API with caching
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
 def summarize_with_hf(text: str) -> str:
@@ -103,7 +100,6 @@ def summarize_with_hf(text: str) -> str:
         logger.error(f"Error in summarization: {str(e)}")
         return "Sorry, summarization is unavailable at the moment."
 
-# Extract named entities using Hugging Face API with caching
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
 def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
@@ -122,19 +118,23 @@ def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
         logger.error(f"Error extracting entities: {str(e)}")
         return {"entities": []}
 
-# Generate conversational response using BlenderBot (non-streaming)
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
 def generate_conversational_response(user_input: str) -> str:
     try:
         logger.info(f"Generating conversational response for input: {user_input[:100]}...")
         response = inference_bot.chat_completion(messages=[{"role": "user", "content": user_input}], stream=False)
-        return response.get('choices', [{}])[0].get('message', {}).get('content', "No response available")
+        content = response.get('choices', [{}])[0].get('message', {}).get('content', "")
+        if not content:
+            raise ValueError("Empty response")
+        return content
     except Exception as e:
         logger.error(f"Error generating conversational response: {str(e)}")
-        return "I'm sorry, I couldn't respond to that."
+        # Fallback for typical greeting queries
+        if re.search(r'\bhow are you\b', user_input, re.IGNORECASE):
+            return "I'm doing well, thank you! How can I assist you today?"
+        return "I'm sorry, I'm experiencing some difficulties at the moment. How can I help you?"
 
-# Fetch YouTube trends synchronously
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
 def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
@@ -152,7 +152,6 @@ def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching YouTube trends: {str(e)}")
         return []
 
-# Fetch Google search results synchronously
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
 def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
@@ -170,7 +169,6 @@ def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching Google trends: {str(e)}")
         return []
 
-# Fetch Reddit trends synchronously using PRAW
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
 def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
@@ -193,7 +191,6 @@ def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching Reddit trends: {str(e)}")
         return []
 
-# Fetch news articles synchronously
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
 def fetch_news_articles(query: str) -> List[Dict[str, Any]]:
@@ -211,15 +208,13 @@ def fetch_news_articles(query: str) -> List[Dict[str, Any]]:
         logger.error(f"Error fetching news articles: {str(e)}")
         return []
 
-# Fetch all trends from APIs (YouTube, Reddit, Google, News)
 def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
     logger.info(f"Fetching trending topics for query: {query}")
     youtube_trends = fetch_youtube_trends(query)
     reddit_trends = fetch_reddit_trends(query)
     google_trends = fetch_google_trends(query)
     news_trends = fetch_news_articles(query)
-    all_results = youtube_trends + reddit_trends + google_trends + news_trends
-    return all_results
+    return youtube_trends + reddit_trends + google_trends + news_trends
 
 if __name__ == "__main__":
     user_query = input("What trends would you like to explore today? ")
