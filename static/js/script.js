@@ -9,7 +9,7 @@ const newChatIcon = document.querySelector('.new-chat-icon');
 const loadingGifPath = '/static/icons/typing-gif.gif';
 const kachifoLogoPath = '/static/logo/kachifo-logo-small.svg';
 
-// Preloaded loading messages moved to the frontend
+// Preloaded loading messages moved entirely to the frontend
 const loadingMessages = [
     "AI is fetching trends for you!",
     "Hold tight! We're gathering data...",
@@ -24,7 +24,7 @@ const scrollToBottom = () => {
     chatWindow.scrollTop = chatWindow.scrollHeight;
 };
 
-// Function to format message with embedded URLs
+// Function to format messages by embedding URLs as clickable links
 function formatMessageWithLinks(message) {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     return message.replace(urlRegex, (url) => {
@@ -32,7 +32,7 @@ function formatMessageWithLinks(message) {
     });
 }
 
-// Function to create a chat bubble element
+// Function to create a chat bubble element for either the user or Kachifo
 function createChatBubble(sender, isTyping = false) {
     const bubble = document.createElement('div');
     bubble.classList.add(sender === 'kachifo' ? 'kachifo-message' : 'user-message');
@@ -48,7 +48,7 @@ function createChatBubble(sender, isTyping = false) {
     const messageContent = document.createElement('div');
     messageContent.classList.add('message-content');
     if (isTyping) {
-        // Optionally show a static loading gif initially
+        // Optionally display a static loading gif initially
         const loadingGif = document.createElement('img');
         loadingGif.src = loadingGifPath;
         loadingGif.alt = 'Loading...';
@@ -61,9 +61,9 @@ function createChatBubble(sender, isTyping = false) {
     return messageContent;
 }
 
-// Function to simulate streaming responses and display loading messages
+// Function to simulate streaming responses by cycling loading messages until the final response arrives
 function startStreaming(message, typingBubble) {
-    // Start cycling through loading messages every 2 seconds
+    // Cycle through preloaded loading messages every 2 seconds
     let loadingInterval = setInterval(() => {
         const randomMessage = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
         typingBubble.innerHTML = `<p class="loading-message">${randomMessage}</p>`;
@@ -86,7 +86,7 @@ function startStreaming(message, typingBubble) {
         } else if (data.general_summary) {
             displayText = data.general_summary;
         }
-        // Clear the typing indicator and start token-by-token animation
+        // Clear the typing indicator and animate token-by-token display
         typingBubble.innerHTML = "";
         const tokens = displayText.split(" ");
         let index = 0;
@@ -105,7 +105,7 @@ function startStreaming(message, typingBubble) {
             } else {
                 clearInterval(interval);
             }
-        }, 200); // Adjust timing as needed for smoothness
+        }, 200); // Adjust timing for smoother animation if needed
     })
     .catch(error => {
         clearInterval(loadingInterval);
@@ -114,13 +114,13 @@ function startStreaming(message, typingBubble) {
     });
 }
 
-// Function to send a message
+// Function to send a message from the user
 async function sendMessage(message) {
     if (!message) {
         message = userInput.value.trim();
     }
     if (message === '') return;
-    // Display user's message
+    // Display the user's message
     createChatBubble('user').innerHTML = formatMessageWithLinks(message);
     userInput.value = '';
     userInput.style.height = 'auto';
@@ -129,11 +129,11 @@ async function sendMessage(message) {
     chatWindow.classList.add('active');
     // Create a bubble for Kachifo's response with a typing indicator
     const typingBubble = createChatBubble('kachifo', true);
-    // Start the simulated streaming (with loading messages)
+    // Start simulated streaming with loading messages until the final response arrives
     startStreaming(message, typingBubble);
 }
 
-// Function to reset the chat window
+// Function to reset the chat window for a new conversation
 function resetChat() {
     chatWindow.innerHTML = '';
     initialView.classList.remove('hidden');
@@ -144,7 +144,7 @@ function resetChat() {
     attachSuggestionListeners();
 }
 
-// Attach suggestion listeners dynamically
+// Dynamically attach listeners to suggestion elements
 function attachSuggestionListeners() {
     const suggestionElements = document.querySelectorAll('.suggestion');
     suggestionElements.forEach(suggestion => {
@@ -152,7 +152,7 @@ function attachSuggestionListeners() {
     });
 }
 
-// Handle suggestion click events
+// Handle suggestion click events to auto-send the suggestion text
 function handleSuggestionClick(event) {
     const suggestionText = event.target.textContent.trim();
     if (suggestionText) {
@@ -160,7 +160,7 @@ function handleSuggestionClick(event) {
     }
 }
 
-// Event listeners and initialization
+// Attach event listeners on DOMContentLoaded and for button/key events
 document.addEventListener('DOMContentLoaded', () => {
     attachSuggestionListeners();
 });
@@ -177,7 +177,7 @@ userInput.addEventListener('keypress', (e) => {
     }
 });
 
-// Auto-resize input field with debounce
+// Debounce function for auto-resizing the input field
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
