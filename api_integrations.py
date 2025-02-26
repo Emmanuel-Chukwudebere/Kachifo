@@ -1,332 +1,228 @@
-# api_integrations.py
 import os
 import logging
+import time
 import requests
+from cachetools import TTLCache
+from functools import wraps
+from dotenv import load_dotenv
+from typing import List, Dict, Any
+import praw
 import json
-from typing import List, Dict, Any, Optional
-from functools import lru_cache
-from requests.exceptions import RequestException, Timeout
-from requests_oauthlib import OAuth1
-from huggingface_hub import InferenceClient
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # Load environment variables
-class APIConfig:
-    """Configuration class for API credentials and settings"""
-    YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
-    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-    GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
-    NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
-    TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
-    TWITTER_API_SECRET_KEY = os.getenv("TWITTER_API_SECRET_KEY")
-    TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-    TWITTER_ACCESS_TOKEN_SECRET = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
-    REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-    REDDIT_SECRET = os.getenv("REDDIT_SECRET")
-    REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
-    HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
-    
-    # API endpoints
-    YOUTUBE_API_URL = "https://www.googleapis.com/youtube/v3/search"
-    TWITTER_API_URL = "https://api.twitter.com/2/tweets/search/recent"
-    GOOGLE_API_URL = "https://www.googleapis.com/customsearch/v1"
-    NEWSAPI_URL = "https://newsapi.org/v2/everything"
-    
-    # HuggingFace models
-    HF_SUMMARY_MODEL = "facebook/bart-large-cnn"
-    HF_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"
-    HF_BOT_MODEL = "facebook/blenderbot-400M-distill"
+load_dotenv()
 
-# Initialize HuggingFace clients
-class HuggingFaceClients:
-    """Singleton class for HuggingFace API clients"""
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.summary_client = InferenceClient(
-                model=APIConfig.HF_SUMMARY_MODEL,
-                token=APIConfig.HF_API_KEY
-            )
-            cls._instance.ner_client = InferenceClient(
-                model=APIConfig.HF_NER_MODEL,
-                token=APIConfig.HF_API_KEY
-            )
-            cls._instance.bot_client = InferenceClient(
-                model=APIConfig.HF_BOT_MODEL,
-                token=APIConfig.HF_API_KEY
-            )
-        return cls._instance
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Initialize clients
-hf_clients = HuggingFaceClients()
+# In-memory caches for summaries and entities
+summary_cache = TTLCache(maxsize=1000, ttl=3600)
+entity_cache = TTLCache(maxsize=1000, ttl=3600)
 
-# Caching decorator with TTL
-def ttl_cache(ttl_seconds: int = 3600):
-    """
-    Custom TTL cache decorator
-    
-    Args:
-        ttl_seconds (int): Time to live in seconds
-    """
+# API keys and configuration variables
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
+
+# Hugging Face API configuration and models
+HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
+HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"
+HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"
+HF_API_BOT_MODEL = "facebook/blenderbot-400M-distill"
+
+# Use synchronous InferenceClient from huggingface_hub
+from huggingface_hub import InferenceClient
+
+inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
+inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
+inference_bot = InferenceClient(model=HF_API_BOT_MODEL, token=HF_API_KEY)
+
+# Synchronous rate limiting decorator
+def rate_limited(max_per_second: float):
+    min_interval = 1.0 / max_per_second
     def decorator(func):
-        cache = {}
-        
+        last_called = [0.0]
+        @wraps(func)
         def wrapper(*args, **kwargs):
-            key = str(args) + str(kwargs)
-            if key in cache:
-                result, timestamp = cache[key]
-                if datetime.now() - timestamp < timedelta(seconds=ttl_seconds):
-                    return result
-                
-            result = func(*args, **kwargs)
-            cache[key] = (result, datetime.now())
-            return result
-            
+            elapsed = time.time() - last_called[0]
+            wait_time = min_interval - elapsed
+            if wait_time > 0:
+                time.sleep(wait_time)
+            last_called[0] = time.time()
+            return func(*args, **kwargs)
         return wrapper
     return decorator
 
-# Error handling decorator
-def api_error_handler(func):
-    """Decorator for handling API errors consistently"""
-    def wrapper(*args, **kwargs):
-        try:
+# Retry logic with exponential backoff (synchronous)
+def retry_with_backoff(exceptions, tries=3, delay=2, backoff=2):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            _tries, _delay = tries, delay
+            while _tries > 1:
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    logger.warning(f"{func.__name__} failed due to {str(e)}, retrying in {_delay} seconds...")
+                    time.sleep(_delay)
+                    _tries -= 1
+                    _delay *= backoff
             return func(*args, **kwargs)
-        except Timeout:
-            logger.error(f"Timeout error in {func.__name__}")
-            return []
-        except RequestException as e:
-            logger.error(f"Request error in {func.__name__}: {str(e)}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error in {func.__name__}: {str(e)}")
-            return []
-    return wrapper
+        return wrapper
+    return decorator
 
-# API Integration Classes
-class YouTubeAPI:
-    """YouTube API integration"""
-    @api_error_handler
-    @ttl_cache(3600)
-    def fetch_trends(self, query: str) -> List[Dict[str, Any]]:
-        params = {
-            'part': 'snippet',
-            'q': query,
-            'type': 'video',
-            'maxResults': 3,
-            'key': APIConfig.YOUTUBE_API_KEY
-        }
-        
-        response = requests.get(APIConfig.YOUTUBE_API_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
-        return [{
-            'title': item['snippet']['title'],
-            'url': f"https://www.youtube.com/watch?v={item['id']['videoId']}",
-            'description': item['snippet']['description'],
-            'source': 'YouTube'
-        } for item in data.get('items', [])]
+# Generate a general summary from individual summaries
+def generate_general_summary(individual_summaries: List[str]) -> str:
+    combined_text = " ".join(individual_summaries)
+    try:
+        logger.info("Generating general summary via Hugging Face API")
+        response = inference_summary.summarization(combined_text, parameters={"max_length": 200, "min_length": 100, "do_sample": False})
+        return response.get('summary_text', "No summary available")
+    except Exception as e:
+        logger.error(f"Error generating general summary: {str(e)}")
+        return "Sorry, I couldn't generate a summary at the moment."
 
-class TwitterAPI:
-    """Twitter API integration"""
-    @api_error_handler
-    @ttl_cache(3600)
-    def fetch_trends(self, query: str) -> List[Dict[str, Any]]:
-        auth = OAuth1(
-            APIConfig.TWITTER_API_KEY,
-            APIConfig.TWITTER_API_SECRET_KEY,
-            APIConfig.TWITTER_ACCESS_TOKEN,
-            APIConfig.TWITTER_ACCESS_TOKEN_SECRET
-        )
-        
-        params = {
-            'query': query,
-            'max_results': 3
-        }
-        
-        response = requests.get(APIConfig.TWITTER_API_URL, auth=auth, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
-        return [{
-            'title': tweet['text'],
-            'url': f"https://twitter.com/statuses/{tweet['id']}",
-            'description': tweet['text'],
-            'source': 'Twitter'
-        } for tweet in data.get('data', [])]
+# Summarize text using Hugging Face API with caching
+@rate_limited(1.0)
+@retry_with_backoff(Exception, tries=3)
+def summarize_with_hf(text: str) -> str:
+    if text in summary_cache:
+        logger.info(f"Cache hit for summarization: {text[:100]}...")
+        return summary_cache[text]
+    try:
+        logger.info(f"Summarizing text: {text[:100]}...")
+        max_input_length = 1024
+        truncated_text = text[:max_input_length]
+        response = inference_summary.summarization(truncated_text, parameters={"max_length": 150, "min_length": 50, "do_sample": False})
+        summary = response.get('summary_text', "No summary available")
+        summary_cache[text] = summary
+        return summary
+    except Exception as e:
+        logger.error(f"Error in summarization: {str(e)}")
+        return "Sorry, summarization is unavailable at the moment."
 
-class GoogleAPI:
-    """Google Custom Search API integration"""
-    @api_error_handler
-    @ttl_cache(3600)
-    def fetch_trends(self, query: str) -> List[Dict[str, Any]]:
-        params = {
-            'q': query,
-            'cx': APIConfig.GOOGLE_CSE_ID,
-            'key': APIConfig.GOOGLE_API_KEY
-        }
-        
-        response = requests.get(APIConfig.GOOGLE_API_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
-        return [{
-            'title': item['title'],
-            'url': item['link'],
-            'description': item.get('snippet', ''),
-            'source': 'Google'
-        } for item in data.get('items', [])]
+# Extract named entities using Hugging Face API with caching
+@rate_limited(1.0)
+@retry_with_backoff(Exception, tries=3)
+def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
+    if text in entity_cache:
+        logger.info(f"Cache hit for NER: {text[:100]}...")
+        return entity_cache[text]
+    try:
+        logger.info(f"Extracting entities from text: {text[:100]}...")
+        max_input_length = 512
+        truncated_text = text[:max_input_length]
+        response = inference_ner.token_classification(truncated_text)
+        entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
+        entity_cache[text] = {"entities": entities}
+        return {"entities": entities}
+    except Exception as e:
+        logger.error(f"Error extracting entities: {str(e)}")
+        return {"entities": []}
 
-class NewsAPI:
-    """NewsAPI integration"""
-    @api_error_handler
-    @ttl_cache(3600)
-    def fetch_trends(self, query: str) -> List[Dict[str, Any]]:
-        params = {
-            'q': query,
-            'apiKey': APIConfig.NEWSAPI_KEY,
-            'pageSize': 3
-        }
-        
-        response = requests.get(APIConfig.NEWSAPI_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
-        
+# Generate conversational response using BlenderBot (non-streaming)
+@rate_limited(1.0)
+@retry_with_backoff(Exception, tries=3)
+def generate_conversational_response(user_input: str) -> str:
+    try:
+        logger.info(f"Generating conversational response for input: {user_input[:100]}...")
+        response = inference_bot.chat_completion(messages=[{"role": "user", "content": user_input}], stream=False)
+        return response.get('choices', [{}])[0].get('message', {}).get('content', "No response available")
+    except Exception as e:
+        logger.error(f"Error generating conversational response: {str(e)}")
+        return "I'm sorry, I couldn't respond to that."
+
+# Fetch YouTube trends synchronously
+@rate_limited(1.0)
+@retry_with_backoff(Exception, tries=3)
+def fetch_youtube_trends(query: str) -> List[Dict[str, Any]]:
+    url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&q={query}&type=video&maxResults=3&key={YOUTUBE_API_KEY}"
+    try:
+        response = requests.get(url)
+        result = response.json()
+        items = result.get('items', [])
         return [{
-            'title': article['title'],
-            'url': article['url'],
-            'description': article.get('description', ''),
-            'source': 'NewsAPI'
-        } for article in data.get('articles', [])]
-        
-""" class RedditAPI:
-    """RedditAPI Integration"""
-    @api_error_handler
-    @ttl_cache(3600)
-    def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
-    """Fetch trending posts from Reddit"""
+            "title": item['snippet']['title'],
+            "url": f"https://www.youtube.com/watch?v={item['id']['videoId']}",
+            "summary": summarize_with_hf(item['snippet']['description'])
+        } for item in items]
+    except Exception as e:
+        logger.error(f"Error fetching YouTube trends: {str(e)}")
+        return []
+
+# Fetch Google search results synchronously
+@rate_limited(1.0)
+@retry_with_backoff(Exception, tries=3)
+def fetch_google_trends(query: str) -> List[Dict[str, Any]]:
+    url = f"https://www.googleapis.com/customsearch/v1?q={query}&cx={GOOGLE_CSE_ID}&key={GOOGLE_API_KEY}"
+    try:
+        response = requests.get(url)
+        result = response.json()
+        items = result.get('items', [])
+        return [{
+            "title": item.get("title"),
+            "url": item.get("link"),
+            "summary": summarize_with_hf(item.get("snippet", ""))
+        } for item in items]
+    except Exception as e:
+        logger.error(f"Error fetching Google trends: {str(e)}")
+        return []
+
+# Fetch Reddit trends synchronously using PRAW
+@rate_limited(1.0)
+@retry_with_backoff(Exception, tries=3)
+def fetch_reddit_trends(query: str) -> List[Dict[str, Any]]:
+    reddit = praw.Reddit(
+        client_id=os.getenv("REDDIT_CLIENT_ID"),
+        client_secret=os.getenv("REDDIT_SECRET"),
+        user_agent=os.getenv("REDDIT_USER_AGENT")
+    )
     try:
         results = []
         for submission in reddit.subreddit("all").search(query, sort="top", limit=3):
+            summary = summarize_with_hf(submission.selftext[:500])
             results.append({
                 "title": submission.title,
                 "url": submission.url,
-                "summary": submission.selftext[:200] if submission.selftext else submission.title
+                "summary": summary
             })
         return results
     except Exception as e:
-        logger.error(f"Reddit API error: {str(e)}")
-        return [] """
+        logger.error(f"Error fetching Reddit trends: {str(e)}")
+        return []
 
-# Main functions for external use
+# Fetch news articles synchronously
+@rate_limited(1.0)
+@retry_with_backoff(Exception, tries=3)
+def fetch_news_articles(query: str) -> List[Dict[str, Any]]:
+    url = f"https://newsapi.org/v2/everything?q={query}&apiKey={NEWSAPI_KEY}"
+    try:
+        response = requests.get(url)
+        result = response.json()
+        articles = result.get('articles', [])
+        return [{
+            "title": article.get("title"),
+            "url": article.get("url"),
+            "summary": summarize_with_hf(article.get("description", ""))
+        } for article in articles]
+    except Exception as e:
+        logger.error(f"Error fetching news articles: {str(e)}")
+        return []
+
+# Fetch all trends from APIs (YouTube, Reddit, Google, News)
 def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
-    """
-    Fetch trends from all sources concurrently
-    
-    Args:
-        query (str): Search query
-        
-    Returns:
-        List[Dict[str, Any]]: Combined results from all sources
-    """
-    apis = [
-        YouTubeAPI(),
-        TwitterAPI(),
-        GoogleAPI(),
-        NewsAPI(),
-        RedditAPI()
-    ]
-    
-    with ThreadPoolExecutor(max_workers=len(apis)) as executor:
-        results = list(executor.map(
-            lambda api: api.fetch_trends(query),
-            apis
-        ))
-    
-    # Flatten results and remove duplicates
-    all_results = []
-    seen_urls = set()
-    
-    for result_list in results:
-        for item in result_list:
-            if item['url'] not in seen_urls:
-                seen_urls.add(item['url'])
-                all_results.append(item)
-    
+    logger.info(f"Fetching trending topics for query: {query}")
+    youtube_trends = fetch_youtube_trends(query)
+    reddit_trends = fetch_reddit_trends(query)
+    google_trends = fetch_google_trends(query)
+    news_trends = fetch_news_articles(query)
+    # Combine results from all sources
+    all_results = youtube_trends + reddit_trends + google_trends + news_trends
     return all_results
 
-@ttl_cache(3600)
-def summarize_with_hf(text: str) -> str:
-    """
-    Summarize text using HuggingFace API
-    
-    Args:
-        text (str): Text to summarize
-        
-    Returns:
-        str: Summarized text
-    """
-    try:
-        max_length = min(len(text.split()), 1024)
-        response = hf_clients.summary_client.summarization(
-            text,
-            parameters={
-                "max_length": max_length,
-                "min_length": max(50, max_length // 4),
-                "do_sample": False
-            }
-        )
-        return response.get('summary_text', "No summary available")
-    except Exception as e:
-        logger.error(f"Error in summarization: {str(e)}")
-        return text[:200] + "..."
-
-def generate_conversational_response(user_input: str) -> str:
-    """
-    Generate conversational response using BlenderBot
-    
-    Args:
-        user_input (str): User's input text
-        
-    Returns:
-        str: Generated response
-    """
-    try:
-        response = hf_clients.bot_client.chat_completion(
-            messages=[{"role": "user", "content": user_input}],
-            stream=False
-        )
-        return response.get('choices', [{}])[0].get('message', {}).get('content', 
-            "I'm sorry, I couldn't process that request."
-        )
-    except Exception as e:
-        logger.error(f"Error in conversation generation: {str(e)}")
-        return "I'm sorry, I'm having trouble processing that right now."
-
-def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
-    """
-    Extract named entities from text
-    
-    Args:
-        text (str): Input text
-        
-    Returns:
-        Dict[str, List[str]]: Dictionary of extracted entities
-    """
-    try:
-        response = hf_clients.ner_client.token_classification(text)
-        entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
-        return {"entities": list(set(entities))}
-    except Exception as e:
-        logger.error(f"Error in entity extraction: {str(e)}")
-        return {"entities": []}
+if __name__ == "__main__":
+    user_query = input("What trends would you like to explore today? ")
+    trends = fetch_trending_topics(user_query)
+    print(json.dumps(trends, indent=2))
