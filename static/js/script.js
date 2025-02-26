@@ -5,24 +5,49 @@ const sendBtn = document.getElementById('send-btn');
 const chatWindow = document.querySelector('.chat-window');
 const initialView = document.querySelector('.initial-view');
 const suggestions = document.querySelector('.suggestions');
-const newChatIcon = document.querySelector('.new-chat-icon');
+const newChatIcon = document.getElementById('new-chat-icon');
 const loadingGifPath = '/static/icons/typing-gif.gif';
 const kachifoLogoPath = '/static/logo/kachifo-logo-small.svg';
 
-// Preloaded loading messages moved entirely to the frontend
+// Expanded set of loading messages moved entirely to the frontend
 const loadingMessages = [
     "AI is fetching trends for you!",
     "Hold tight! We're gathering data...",
     "Did you know? Honey never spoils.",
     "Fun fact: Octopuses have three hearts.",
-    "Did you know AI can predict trends 10x faster than humans?",
-    "Tip: Try searching for trending news about technology."
+    "AI is crunching the latest data—please wait.",
+    "Stay tuned! We're compiling the top trends.",
+    "Pro tip: Great insights are on the way.",
+    "Did you know? Your trends are being curated in real-time."
 ];
 
 // Helper function: Scroll to the latest message
 const scrollToBottom = () => {
     chatWindow.scrollTop = chatWindow.scrollHeight;
 };
+
+// Helper function to animate text token-by-token
+function animateText(element, text, tokenInterval = 200) {
+    element.innerHTML = "";
+    const tokens = text.split(" ");
+    let index = 0;
+    const interval = setInterval(() => {
+        if (index < tokens.length) {
+            const span = document.createElement('span');
+            span.textContent = tokens[index] + " ";
+            span.style.opacity = '0';
+            span.style.transition = 'opacity 0.5s ease-in';
+            element.appendChild(span);
+            setTimeout(() => {
+                span.style.opacity = '1';
+            }, 10);
+            index++;
+            scrollToBottom();
+        } else {
+            clearInterval(interval);
+        }
+    }, tokenInterval);
+}
 
 // Function to format messages by embedding URLs as clickable links
 function formatMessageWithLinks(message) {
@@ -61,14 +86,14 @@ function createChatBubble(sender, isTyping = false) {
     return messageContent;
 }
 
-// Function to simulate streaming responses by cycling loading messages until the final response arrives
+// Function to simulate streaming responses by cycling loading messages
+// with smooth token-by-token animation, and then animate the final response.
 function startStreaming(message, typingBubble) {
-    // Cycle through preloaded loading messages every 2 seconds
+    // Cycle through preloaded loading messages every 4 seconds
     let loadingInterval = setInterval(() => {
         const randomMessage = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
-        typingBubble.innerHTML = `<p class="loading-message">${randomMessage}</p>`;
-        scrollToBottom();
-    }, 2000);
+        animateText(typingBubble, randomMessage, 100);
+    }, 4000);
 
     // Fetch the final response from the backend
     fetch('/interact', {
@@ -86,26 +111,9 @@ function startStreaming(message, typingBubble) {
         } else if (data.general_summary) {
             displayText = data.general_summary;
         }
-        // Clear the typing indicator and animate token-by-token display
+        // Clear the typing indicator and animate the final response token-by-token
         typingBubble.innerHTML = "";
-        const tokens = displayText.split(" ");
-        let index = 0;
-        const interval = setInterval(() => {
-            if (index < tokens.length) {
-                const span = document.createElement('span');
-                span.textContent = tokens[index] + " ";
-                span.style.opacity = '0';
-                span.style.transition = 'opacity 0.5s ease-in';
-                typingBubble.appendChild(span);
-                setTimeout(() => {
-                    span.style.opacity = '1';
-                }, 10);
-                index++;
-                scrollToBottom();
-            } else {
-                clearInterval(interval);
-            }
-        }, 200); // Adjust timing for smoother animation if needed
+        animateText(typingBubble, displayText, 200);
     })
     .catch(error => {
         clearInterval(loadingInterval);
