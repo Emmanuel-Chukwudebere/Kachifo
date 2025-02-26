@@ -5,6 +5,7 @@ const sendBtn = document.getElementById('send-btn');
 const chatWindow = document.querySelector('.chat-window');
 const initialView = document.querySelector('.initial-view');
 const suggestions = document.querySelector('.suggestions');
+// Use getElementById with a check to prevent null reference errors
 const newChatIcon = document.getElementById('new-chat-icon');
 const loadingGifPath = '/static/icons/typing-gif.gif';
 const kachifoLogoPath = '/static/logo/kachifo-logo-small.svg';
@@ -18,7 +19,7 @@ const loadingMessages = [
     "AI is crunching the latest data—please wait.",
     "Stay tuned! We're compiling the top trends.",
     "Pro tip: Great insights are on the way.",
-    "Did you know? Your trends are being curated in real-time."
+    "Your trends are being curated in real-time."
 ];
 
 // Helper function: Scroll to the latest message
@@ -73,7 +74,6 @@ function createChatBubble(sender, isTyping = false) {
     const messageContent = document.createElement('div');
     messageContent.classList.add('message-content');
     if (isTyping) {
-        // Optionally display a static loading gif initially
         const loadingGif = document.createElement('img');
         loadingGif.src = loadingGifPath;
         loadingGif.alt = 'Loading...';
@@ -105,13 +105,11 @@ function startStreaming(message, typingBubble) {
     .then(data => {
         clearInterval(loadingInterval);
         let displayText = "";
-        // Determine response type based on API output
         if (data.response) {
             displayText = data.response;
         } else if (data.general_summary) {
             displayText = data.general_summary;
         }
-        // Clear the typing indicator and animate the final response token-by-token
         typingBubble.innerHTML = "";
         animateText(typingBubble, displayText, 200);
     })
@@ -128,16 +126,13 @@ async function sendMessage(message) {
         message = userInput.value.trim();
     }
     if (message === '') return;
-    // Display the user's message
     createChatBubble('user').innerHTML = formatMessageWithLinks(message);
     userInput.value = '';
     userInput.style.height = 'auto';
     initialView.classList.add('hidden');
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
-    // Create a bubble for Kachifo's response with a typing indicator
     const typingBubble = createChatBubble('kachifo', true);
-    // Start simulated streaming with loading messages until the final response arrives
     startStreaming(message, typingBubble);
 }
 
@@ -210,10 +205,15 @@ userInput.addEventListener('input', debounce(function() {
     }
 }, 100));
 
-newChatIcon.addEventListener('click', (e) => {
-    e.preventDefault();
-    resetChat();
-});
+// Only attach listener if newChatIcon exists
+if (newChatIcon) {
+    newChatIcon.addEventListener('click', (e) => {
+        e.preventDefault();
+        resetChat();
+    });
+} else {
+    console.warn("newChatIcon element not found.");
+}
 
 window.addEventListener('unhandledrejection', function(event) {
     console.error('Unhandled promise rejection:', event.reason);
