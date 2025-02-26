@@ -78,7 +78,7 @@ def generate_general_summary(individual_summaries: List[str]) -> str:
     combined_text = " ".join(individual_summaries)
     try:
         logger.info("Generating general summary via Hugging Face API")
-        response = inference_summary.summarization(combined_text, max_length=200, min_length=100, do_sample=False)
+        response = inference_summary.summarization(combined_text)
         return response.get('summary_text', "No summary available")
     except Exception as e:
         logger.error(f"Error generating general summary: {str(e)}")
@@ -95,7 +95,7 @@ def summarize_with_hf(text: str) -> str:
         logger.info(f"Summarizing text: {text[:100]}...")
         max_input_length = 1024
         truncated_text = text[:max_input_length]
-        response = inference_summary.summarization(truncated_text, max_length=150, min_length=50, do_sample=False)
+        response = inference_summary.summarization(truncated_text)
         summary = response.get('summary_text', "No summary available")
         summary_cache[text] = summary
         return summary
@@ -218,7 +218,6 @@ def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
     reddit_trends = fetch_reddit_trends(query)
     google_trends = fetch_google_trends(query)
     news_trends = fetch_news_articles(query)
-    # Combine results from all sources
     all_results = youtube_trends + reddit_trends + google_trends + news_trends
     return all_results
 
