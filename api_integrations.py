@@ -7,8 +7,6 @@ from functools import wraps
 from dotenv import load_dotenv
 from typing import List, Dict, Any
 import praw
-import json
-import re
 
 # Load environment variables
 load_dotenv()
@@ -31,13 +29,14 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"
 HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"
-HF_API_BOT_MODEL = "facebook/blenderbot-400M-distill"
+# Update the conversational model to use Microsoft phi-4 for best performance.
+HF_API_BOT_MODEL = "microsoft/phi-4/v1/chat/completions"
 
 # Use synchronous InferenceClient from huggingface_hub
 from huggingface_hub import InferenceClient
-
 inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
 inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
+# Initialize inference_bot with the updated conversational model
 inference_bot = InferenceClient(model=HF_API_BOT_MODEL, token=HF_API_KEY)
 
 def rate_limited(max_per_second: float):
@@ -121,19 +120,37 @@ def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
 def generate_conversational_response(user_input: str) -> str:
+    """
+    Generate a conversational response using Microsoft phi-4.
+    This function sends a conversation history (system prompt plus user query) so that
+    the model can determine the appropriate conversational tone.
+    """
     try:
         logger.info(f"Generating conversational response for input: {user_input[:100]}...")
-        response = inference_bot.chat_completion(messages=[{"role": "user", "content": user_input}], stream=False)
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful, engaging, and knowledgeable AI assistant. Respond naturally and conversationally."
+            },
+            {
+                "role": "user",
+                "content": user_input
+            }
+        ]
+        response = inference_bot.chat.completions.create(
+            model="microsoft/phi-4/v1/chat/completions",
+            messages=messages,
+            max_tokens=150,
+            stream=False
+        )
         content = response.get('choices', [{}])[0].get('message', {}).get('content', "")
         if not content:
-            raise ValueError("Empty response")
+            raise ValueError("Received empty response from the chat model.")
+        logger.info("Conversational response generated successfully.")
         return content
     except Exception as e:
-        logger.error(f"Error generating conversational response: {str(e)}")
-        # Fallback for typical greeting queries
-        if re.search(r'\bhow are you\b', user_input, re.IGNORECASE):
-            return "I'm doing well, thank you! How can I assist you today?"
-        return "I'm sorry, I'm experiencing some difficulties at the moment. How can I help you?"
+        logger.error(f"Error generating conversational response: {str(e)}", exc_info=True)
+        raise e
 
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
@@ -219,4 +236,5 @@ def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
 if __name__ == "__main__":
     user_query = input("What trends would you like to explore today? ")
     trends = fetch_trending_topics(user_query)
+    import json
     print(json.dumps(trends, indent=2))
