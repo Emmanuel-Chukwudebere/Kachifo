@@ -11,7 +11,6 @@ from flask_talisman import Talisman
 from functools import wraps
 from werkzeug.exceptions import HTTPException
 
-# Import synchronous API integrations
 from api_integrations import (
     fetch_trending_topics,
     summarize_with_hf,
@@ -20,10 +19,8 @@ from api_integrations import (
     generate_general_summary
 )
 
-# Initialize Flask app
 app = Flask(__name__)
 
-# Enforce HTTPS and set secure headers using Flask-Talisman
 Talisman(app, content_security_policy={
     'default-src': ["'self'", 'https:'],
     'script-src': ["'self'", 'https:'],
@@ -32,12 +29,10 @@ Talisman(app, content_security_policy={
     'connect-src': ["'self'", 'https:']
 })
 
-# Simple in-memory caching configuration (for rate limiting only)
 app.config['CACHE_TYPE'] = 'simple'
 app.config['CACHE_DEFAULT_TIMEOUT'] = 300
 cache = Cache(app)
 
-# Setup logging
 def setup_logging():
     log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
     log_file = os.environ.get('LOG_FILE', 'kachifo.log')
@@ -52,16 +47,10 @@ def setup_logging():
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Helper function for standardized responses
 def create_standard_response(data, status_code, message):
-    response = {
-        "data": data,
-        "status": status_code,
-        "message": message
-    }
+    response = {"data": data, "status": status_code, "message": message}
     return response, status_code
 
-# Log each incoming request and outgoing response
 @app.before_request
 def log_request_info():
     logger.info(f'Request: {request.method} {request.url}')
@@ -74,7 +63,6 @@ def log_response_info(response):
     logger.debug(f'Headers: {response.headers}')
     return response
 
-# Rate limiting middleware using in-memory cache
 def rate_limit(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -89,26 +77,22 @@ def rate_limit(func):
         return func(*args, **kwargs)
     return wrapper
 
-# Input sanitization and classification
 def sanitize_input(query):
     sanitized = re.sub(r"[^\w\s]", "", query).strip()
     logger.info(f"Sanitized input: {sanitized}")
     return sanitized
 
 def classify_input_type(user_input):
-    # If any query-specific keywords are found, treat as query; otherwise conversation.
     query_pattern = re.compile(r'\b(search|find|look up|what is|tell me|trending|give me|show me)\b', re.IGNORECASE)
     if query_pattern.search(user_input):
         return 'query'
     return 'conversation'
 
-# Home route
 @app.route('/')
 def home():
     logger.info("Home page accessed")
     return render_template('index.html', message="Welcome to Kachifo - Discover trends")
 
-# /interact endpoint handles both conversational and query inputs
 @app.route('/interact', methods=['POST'])
 @rate_limit
 def interact():
@@ -157,7 +141,6 @@ def interact():
     else:
         return jsonify({'error': 'Invalid input type.'}), 400
 
-# /search endpoint (similar to /interact for query processing)
 @app.route('/search', methods=['GET', 'POST'])
 @rate_limit
 def search_trends():
@@ -192,7 +175,6 @@ def search_trends():
         logger.error(f"Error searching trends: {str(e)}", exc_info=True)
         return jsonify({'error': 'An error occurred while fetching trends.'}), 500
 
-# Global error handler for unhandled exceptions
 @app.errorhandler(Exception)
 def handle_exception(e):
     if isinstance(e, HTTPException):
