@@ -96,6 +96,7 @@ def sanitize_input(query):
     return sanitized
 
 def classify_input_type(user_input):
+    # If any query-specific keywords are found, treat as query; otherwise conversation.
     query_pattern = re.compile(r'\b(search|find|look up|what is|tell me|trending|give me|show me)\b', re.IGNORECASE)
     if query_pattern.search(user_input):
         return 'query'
@@ -117,7 +118,6 @@ def interact():
 
     input_type = classify_input_type(user_input)
     
-    # Conversational input is processed via BlenderBot
     if input_type == 'conversation':
         try:
             response_text = generate_conversational_response(user_input)
@@ -127,7 +127,6 @@ def interact():
             logger.error(f"Error generating conversational response: {str(e)}", exc_info=True)
             return jsonify({'error': 'An error occurred. Please try again later.'}), 500
 
-    # Query-type input triggers trending topics lookup and summarization
     elif input_type == 'query':
         try:
             logger.info(f"Handling query: {user_input}")
