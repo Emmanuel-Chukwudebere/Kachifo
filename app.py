@@ -109,7 +109,7 @@ def interact():
             return jsonify({'response': response_text})
         except Exception as e:
             logger.error(f"Error generating conversational response: {str(e)}", exc_info=True)
-            return jsonify({'error': 'An error occurred. Please try again later.'}), 500
+            return jsonify({'error': 'An error occurred while generating the conversational response.'}), 500
 
     elif input_type == 'query':
         try:
@@ -137,7 +137,7 @@ def interact():
             return jsonify(final_response)
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}", exc_info=True)
-            return jsonify({'error': 'An error occurred while processing your request.'}), 500
+            return jsonify({'error': 'An error occurred while processing your query.'}), 500
     else:
         return jsonify({'error': 'Invalid input type.'}), 400
 
