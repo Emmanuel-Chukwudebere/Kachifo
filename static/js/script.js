@@ -5,12 +5,11 @@ const sendBtn = document.getElementById('send-btn');
 const chatWindow = document.querySelector('.chat-window');
 const initialView = document.querySelector('.initial-view');
 const suggestions = document.querySelector('.suggestions');
-// Use getElementById with a check to prevent null reference errors
-const newChatIcon = document.getElementById('new-chat-icon');
+const newChatIcon = document.getElementById('new-chat-icon'); // Ensure this ID exists in your HTML
 const loadingGifPath = '/static/icons/typing-gif.gif';
 const kachifoLogoPath = '/static/logo/kachifo-logo-small.svg';
 
-// Expanded set of loading messages moved entirely to the frontend
+// Expanded set of loading messages
 const loadingMessages = [
     "AI is fetching trends for you!",
     "Hold tight! We're gathering data...",
@@ -58,7 +57,7 @@ function formatMessageWithLinks(message) {
     });
 }
 
-// Function to create a chat bubble element for either the user or Kachifo
+// Create a chat bubble element for user or Kachifo
 function createChatBubble(sender, isTyping = false) {
     const bubble = document.createElement('div');
     bubble.classList.add(sender === 'kachifo' ? 'kachifo-message' : 'user-message');
@@ -86,16 +85,13 @@ function createChatBubble(sender, isTyping = false) {
     return messageContent;
 }
 
-// Function to simulate streaming responses by cycling loading messages
-// with smooth token-by-token animation, and then animate the final response.
+// Simulate streaming responses with loading messages then animate final response
 function startStreaming(message, typingBubble) {
-    // Cycle through preloaded loading messages every 4 seconds
     let loadingInterval = setInterval(() => {
         const randomMessage = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
         animateText(typingBubble, randomMessage, 100);
     }, 4000);
 
-    // Fetch the final response from the backend
     fetch('/interact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -120,7 +116,7 @@ function startStreaming(message, typingBubble) {
     });
 }
 
-// Function to send a message from the user
+// Send a message from the user
 async function sendMessage(message) {
     if (!message) {
         message = userInput.value.trim();
@@ -128,7 +124,11 @@ async function sendMessage(message) {
     if (message === '') return;
     createChatBubble('user').innerHTML = formatMessageWithLinks(message);
     userInput.value = '';
-    userInput.style.height = 'auto';
+    if (userInput) {
+        userInput.style.maxHeight = "none";
+        userInput.style.height = 'auto';
+        userInput.style.height = userInput.scrollHeight + 'px';
+    }
     initialView.classList.add('hidden');
     suggestions.classList.add('hidden');
     chatWindow.classList.add('active');
@@ -136,18 +136,21 @@ async function sendMessage(message) {
     startStreaming(message, typingBubble);
 }
 
-// Function to reset the chat window for a new conversation
+// Reset the chat window for a new conversation
 function resetChat() {
     chatWindow.innerHTML = '';
     initialView.classList.remove('hidden');
     suggestions.classList.remove('hidden');
     chatWindow.classList.remove('active');
-    userInput.value = '';
+    if (userInput) {
+        userInput.value = '';
+        userInput.style.height = 'auto';
+    }
     scrollToBottom();
     attachSuggestionListeners();
 }
 
-// Dynamically attach listeners to suggestion elements
+// Attach listeners to suggestion elements
 function attachSuggestionListeners() {
     const suggestionElements = document.querySelectorAll('.suggestion');
     suggestionElements.forEach(suggestion => {
@@ -155,7 +158,7 @@ function attachSuggestionListeners() {
     });
 }
 
-// Handle suggestion click events to auto-send the suggestion text
+// Handle suggestion click events
 function handleSuggestionClick(event) {
     const suggestionText = event.target.textContent.trim();
     if (suggestionText) {
@@ -163,7 +166,6 @@ function handleSuggestionClick(event) {
     }
 }
 
-// Attach event listeners on DOMContentLoaded and for button/key events
 document.addEventListener('DOMContentLoaded', () => {
     attachSuggestionListeners();
 });
@@ -180,7 +182,7 @@ userInput.addEventListener('keypress', (e) => {
     }
 });
 
-// Debounce function for auto-resizing the input field
+// Debounce for auto-resizing input field
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -193,9 +195,12 @@ function debounce(func, wait) {
     };
 }
 
-userInput.addEventListener('input', debounce(function() {
-    this.style.height = 'auto';
-    this.style.height = (this.scrollHeight) + 'px';
+userInput && userInput.addEventListener('input', debounce(function() {
+    if (this) {
+        this.style.maxHeight = "none";
+        this.style.height = 'auto';
+        this.style.height = this.scrollHeight + 'px';
+    }
     if (this.value.trim() !== '') {
         initialView.classList.add('typing');
         suggestions.classList.add('typing');
@@ -205,7 +210,7 @@ userInput.addEventListener('input', debounce(function() {
     }
 }, 100));
 
-// Only attach listener if newChatIcon exists
+// Attach reset chat listener only if the element exists
 if (newChatIcon) {
     newChatIcon.addEventListener('click', (e) => {
         e.preventDefault();
