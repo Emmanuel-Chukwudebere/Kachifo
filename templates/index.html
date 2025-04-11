@@ -15,13 +15,20 @@
 
         gtag('config', 'G-E83TW0FW5P');
     </script>
+    <!-- Google Fonts - Added Montserrat -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
 
 <body>
     <header>
-        <div class="new-chat-icon">
+        <div class="brand-logo">
+            <!-- Optional: Add small logo here for persistent branding -->
+        </div>
+        <div class="new-chat-icon" title="Start a new chat">
             <img src="{{ url_for('static', filename='icons/chat-24-regular.svg') }}" alt="New Chat">
         </div>
     </header>
@@ -48,16 +55,93 @@
 
         <section class="chat-window">
             <!-- Chat messages will appear here dynamically -->
+            <!-- Example of the typing indicator that can be added dynamically -->
+            <!-- <div class="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div> -->
         </section>
     </main>
 
     <footer class="input-container">
         <textarea id="user-input" placeholder="Discover trends ↝" rows="1"></textarea>
-        <button id="send-btn">
+        <button id="send-btn" title="Send message">
             <img src="{{ url_for('static', filename='icons/send-24-regular.svg') }}" alt="Send Icon">
         </button>
     </footer>
 
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <!-- Additional script for enhanced functionality -->
+    <script>
+        // This script enhances the UI functionality
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Auto-resize textarea as user types
+            const userInput = document.getElementById('user-input');
+            
+            userInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = (this.scrollHeight) + 'px';
+                
+                // Reset height if empty
+                if (this.value.length === 0) {
+                    this.style.height = '';
+                }
+            });
+            
+            // Focus input when page loads
+            setTimeout(() => {
+                userInput.focus();
+            }, 1000);
+            
+            // Add timestamps to messages (for demonstration)
+            function addTimestampToMessages() {
+                const messages = document.querySelectorAll('.kachifo-message, .user-message');
+                messages.forEach(message => {
+                    if (!message.querySelector('.message-timestamp')) {
+                        const timestamp = document.createElement('div');
+                        timestamp.className = 'message-timestamp';
+                        timestamp.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        
+                        if (message.classList.contains('user-message')) {
+                            message.appendChild(timestamp);
+                        } else {
+                            message.querySelector('.message-content').appendChild(timestamp);
+                        }
+                    }
+                });
+            }
+            
+            // Call this function whenever a new message is added
+            // This is just for demonstration - you'll need to integrate with your actual message creation logic
+            
+            // Example function to show typing indicator
+            function showTypingIndicator() {
+                const chatWindow = document.querySelector('.chat-window');
+                const typingIndicator = document.createElement('div');
+                typingIndicator.className = 'typing-indicator';
+                typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+                chatWindow.appendChild(typingIndicator);
+                
+                // Auto scroll to bottom
+                chatWindow.scrollTop = chatWindow.scrollHeight;
+                
+                // Remove typing indicator after some time (simulating response)
+                setTimeout(() => {
+                    typingIndicator.remove();
+                    // Here you would add the actual response
+                }, 2000);
+            }
+            
+            // Demonstration of typing indicator when sending a message
+            document.getElementById('send-btn').addEventListener('click', function() {
+                if (userInput.value.trim() !== '') {
+                    // After sending user message, show typing indicator
+                    setTimeout(showTypingIndicator, 500);
+                }
+            });
+        });
+    </script>
 </body>
 </html>
