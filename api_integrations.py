@@ -101,8 +101,21 @@ def summarize_with_hf(text: str) -> str:
         logger.info(f"Summarizing text: {text[:50]}...")
         max_input_length = 1024
         truncated_text = text[:max_input_length]
+        
+        # The issue is here - update to handle direct string response from InferenceClient
         response = inference_summary.summarization(truncated_text)
-        summary = response.get('summary_text', "No summary available")
+        
+        # Check if response is already a string (direct result from API)
+        if isinstance(response, str):
+            summary = response
+        # If response is a dictionary (old API format)
+        elif isinstance(response, dict):
+            summary = response.get('summary_text', "No summary available")
+        else:
+            # For any other unexpected response format
+            logger.warning(f"Unexpected response format: {type(response)}")
+            summary = str(response) if response else "No summary available"
+            
         summary_cache[text] = summary
         return summary
     except Exception as e:
