@@ -1,21 +1,27 @@
-from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, date
 
-db = SQLAlchemy()
+# This file is being kept as a placeholder for future data structures
+# that might be needed without relying on a database.
 
-class Trend(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    query = db.Column(db.String(100), nullable=False)
-    category = db.Column(db.String(50), nullable=False)
-    title = db.Column(db.String(200), nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+class TrendData:
+    """In-memory representation of trend data"""
+    def __init__(self, query, category, title):
+        self.query = query
+        self.category = category
+        self.title = title
+        self.timestamp = datetime.utcnow()
 
-class UserQuery(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    query = db.Column(db.String(100), nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+class UserQueryData:
+    """In-memory representation of user query data"""
+    def __init__(self, query):
+        self.query = query
+        self.timestamp = datetime.utcnow()
 
-class DailyUsage(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.Date, nullable=False, unique=True)
-    count = db.Column(db.Integer, default=0)
+class UsageData:
+    """In-memory representation of usage statistics"""
+    def __init__(self):
+        self.date = date.today()
+        self.count = 0
+        
+    def increment(self):
+        self.count += 1

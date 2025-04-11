@@ -29,13 +29,20 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"
 HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"
-HF_API_BOT_MODEL = "microsoft/phi-4/v1/chat/completions"
+HF_API_BOT_MODEL = "microsoft/phi-4/v1"
 
 # Initialize HuggingFace inference clients
-from huggingface_hub import InferenceClient
-inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
-inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
-inference_bot = InferenceClient(model=HF_API_BOT_MODEL, token=HF_API_KEY)
+try:
+    from huggingface_hub import InferenceClient
+    inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
+    inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
+    inference_bot = InferenceClient(model=HF_API_BOT_MODEL, token=HF_API_KEY)
+    logger.info("Successfully initialized HuggingFace inference clients")
+except Exception as e:
+    logger.error(f"Error initializing HuggingFace clients: {str(e)}")
+    inference_summary = None
+    inference_ner = None
+    inference_bot = None
 
 def rate_limited(max_per_second: float):
     """Decorator to limit the rate at which a function can be called."""
@@ -79,8 +86,18 @@ def generate_general_summary(individual_summaries: List[str]) -> str:
     combined_text = " ".join(individual_summaries)
     try:
         logger.info("Generating general summary via Hugging Face API")
+        if not inference_summary:
+            return "Summary service unavailable at the moment."
+            
         response = inference_summary.summarization(combined_text)
-        return response.get('summary_text', "No summary available")
+        
+        # Handle different response formats
+        if isinstance(response, str):
+            return response
+        elif isinstance(response, dict):
+            return response.get('summary_text', "No summary available")
+        else:
+            return str(response) if response else "No summary available"
     except Exception as e:
         logger.error(f"Error generating general summary: {str(e)}")
         return "Sorry, I couldn't generate a summary at the moment."
@@ -102,20 +119,22 @@ def summarize_with_hf(text: str) -> str:
         max_input_length = 1024
         truncated_text = text[:max_input_length]
         
-        # The issue is here - update to handle direct string response from InferenceClient
+        if not inference_summary:
+            return "Summarization service unavailable at the moment."
+            
+        # Make the API call
         response = inference_summary.summarization(truncated_text)
         
-        # Check if response is already a string (direct result from API)
+        # Process the response based on its type
         if isinstance(response, str):
             summary = response
-        # If response is a dictionary (old API format)
         elif isinstance(response, dict):
             summary = response.get('summary_text', "No summary available")
         else:
-            # For any other unexpected response format
             logger.warning(f"Unexpected response format: {type(response)}")
             summary = str(response) if response else "No summary available"
             
+        # Cache and return the summary
         summary_cache[text] = summary
         return summary
     except Exception as e:
@@ -138,9 +157,20 @@ def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
         logger.info(f"Extracting entities from text: {text[:50]}...")
         max_input_length = 512
         truncated_text = text[:max_input_length]
+        
+        if not inference_ner:
+            return {"entities": []}
+            
         response = inference_ner.token_classification(truncated_text)
-        # Filter entities by type
-        entities = [ent['word'] for ent in response if ent['entity_group'] in ['ORG', 'PER', 'LOC']]
+        
+        # Ensure response is a list of dictionaries
+        if not isinstance(response, list):
+            logger.warning(f"Unexpected NER response format: {type(response)}")
+            entities = []
+        else:
+            # Filter entities by type
+            entities = [ent['word'] for ent in response if 'entity_group' in ent and 'word' in ent and ent['entity_group'] in ['ORG', 'PER', 'LOC']]
+        
         result = {"entities": entities}
         entity_cache[text] = result
         return result
@@ -157,6 +187,10 @@ def generate_conversational_response(user_input: str) -> str:
         
     try:
         logger.info(f"Generating conversational response for input: {user_input[:50]}...")
+        
+        if not inference_bot:
+            return "Conversational service unavailable at the moment."
+            
         messages = [
             {
                 "role": "system",
@@ -168,14 +202,40 @@ def generate_conversational_response(user_input: str) -> str:
             }
         ]
         
-        response = inference_bot.chat.completions.create(
-            model="microsoft/phi-4/v1/chat/completions",
-            messages=messages,
-            max_tokens=150,
-            stream=False
-        )
+        # Use the proper API format
+        try:
+            # First try the chat completions format
+            response = inference_bot.chat_completion(messages=messages, max_tokens=150)
+            
+            # Handle response formats
+            if isinstance(response, dict) and 'choices' in response:
+                # OpenAI-like format
+                content = response.get('choices', [{}])[0].get('message', {}).get('content', "")
+            elif isinstance(response, dict) and 'generated_text' in response:
+                # HF text generation format
+                content = response.get('generated_text', "")
+            elif isinstance(response, dict):
+                # Other dictionary format
+                content = str(response)
+            elif isinstance(response, str):
+                # Direct string response
+                content = response
+            else:
+                content = str(response) if response else ""
+                
+        except Exception as chat_err:
+            logger.warning(f"Chat completion failed, trying text generation: {str(chat_err)}")
+            # Fallback to text generation
+            prompt = f"System: You are a helpful assistant.\nUser: {user_input}\nAssistant:"
+            response = inference_bot.text_generation(prompt=prompt, max_new_tokens=150)
+            
+            if isinstance(response, dict) and 'generated_text' in response:
+                content = response['generated_text'].split('Assistant:')[-1].strip()
+            elif isinstance(response, str):
+                content = response.split('Assistant:')[-1].strip()
+            else:
+                content = str(response) if response else ""
         
-        content = response.get('choices', [{}])[0].get('message', {}).get('content', "")
         if not content:
             raise ValueError("Received empty response from the chat model.")
             

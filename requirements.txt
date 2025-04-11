@@ -1,13 +1,12 @@
-psycopg2-binary
-aiocache
-youtube-transcript-api
-google-api-python-client
-
-# Asynchronous web framework
-flask                     # flask for handling asynchronous web requests
-flask-caching
+# Core dependencies
+flask                     # flask for handling web requests
+flask-caching             # For caching support
+flask-Cors                # For handling Cross-Origin Resource Sharing
+flask_talisman            # Security features
 
 # HTTP libraries
+requests                  # For making HTTP requests
+requests-oauthlib        # For OAuth authentication
 aiohttp                   # For making asynchronous HTTP requests
 httpx                     # Optional: Another HTTP library that supports async
 
@@ -17,7 +16,7 @@ pandas                    # Data manipulation and analysis
 scipy                     # For scientific computations
 spacy                     # NLP library
 
-# Spacy model (ensure this matches the version you need)
+# Spacy model
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.5.0/en_core_web_sm-3.5.0.tar.gz
 
 # Caching libraries
@@ -31,37 +30,24 @@ tweepy                   # For accessing Twitter API
 google-api-core          # Core libraries for Google API
 google-api-python-client  # Client library for Google APIs
 google-auth              # Authentication for Google services
-
-# flask-related libraries that may still be useful
-# flask-Cache             # For caching support, ensure compatibility with flask
-flask-Cors                # For handling Cross-Origin Resource Sharing
-# flask-Limiter             # Rate limiting, check for flask compatibility
-flask-SQLAlchemy          # For SQLAlchemy support; you can use SQLAlchemy directly with flask
-flask_talisman            # Security features; consider using alternative security features in flask
+youtube-transcript-api   # For YouTube transcript access
 
 # Authentication libraries
-requests                  # For making HTTP requests
-requests-oauthlib        # For OAuth authentication
+cryptography              # For cryptographic operations
 
 # Other dependencies
 beautifulsoup4            # For HTML parsing
 html2text                 # For converting HTML to plain text
 nltk                     # Natural Language Toolkit
 datasets                  # For working with datasets
-cryptography              # For cryptographic operations
-gunicorn                  # WSGI HTTP server; optional if using with flask
-sqlalchemy                # ORM for database interaction
-psycopg2                 # PostgreSQL adapter
-psycopg2-binary          # Binary package for psycopg2
-PyMySQL                  # MySQL adapter if needed
+gunicorn                  # WSGI HTTP server
 
 # Development utilities
 python-dotenv             # For loading environment variables
 sentry-sdk                # For error tracking and monitoring
-Werkzeug                  # May still be needed for some utilities; check flask documentation
+Werkzeug                  # Utilities for WSGI web applications
 
 # Other libraries
-aioflask                 # For integrating Flask's features with async functionality
 annotated-types          # Type hints for Python
 bitsandbytes              # Library for managing large tensors
 blinker                   # For signal support
@@ -91,9 +77,7 @@ pycparser                # C parser in Python
 pyparsing                # For parsing text
 ratelimit                # For rate limiting in code
 rsa                      # For RSA encryption and decryption
-sentry-sdk               # For monitoring and error reporting
 sniffio                  # For async testing utilities
-SQLAlchemy               # SQL toolkit and Object-Relational Mapping (ORM)
 thinc                    # Machine learning library
 tokenizers               # For tokenization in NLP tasks
 torchaudio               # For audio processing with PyTorch

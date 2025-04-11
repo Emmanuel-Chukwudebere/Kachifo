@@ -30,8 +30,11 @@ Talisman(app, content_security_policy={
 
 # Configure in-memory caching
 app.config['CACHE_TYPE'] = 'simple'
-app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # 5 minutes
+app.config['CACHE_DEFAULT_TIMEOUT'] = 3600  # 1 hour
 cache = Cache(app)
+
+# Initialize usage statistics
+daily_usage_count = 0
 
 def setup_logging():
     """Configure application logging."""
@@ -136,6 +139,9 @@ def home():
 @rate_limit
 def interact():
     """Main interaction endpoint for handling both queries and conversations."""
+    global daily_usage_count
+    daily_usage_count += 1
+    
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -163,6 +169,15 @@ def interact():
 
 def process_search_query(query):
     """Process a search query and return results with summaries."""
+    # Try to get from cache first
+    cache_key = f"search_query:{query}"
+    cached_results = cache.get(cache_key)
+    
+    if cached_results:
+        logger.info(f"Cache hit for query: {query}")
+        return jsonify(cached_results)
+    
+    # If not in cache, fetch new results
     results = fetch_trending_topics(query)
     
     # Process results and generate summaries
@@ -195,6 +210,9 @@ def process_search_query(query):
         'general_summary': general_summary
     }
     
+    # Cache the results
+    cache.set(cache_key, final_response, timeout=1800)  # Cache for 30 minutes
+    
     return jsonify(final_response)
 
 @app.route('/search', methods=['GET', 'POST'])
@@ -214,6 +232,13 @@ def search_trends():
     # Sanitize input and process query
     query = sanitize_input(query)
     return process_search_query(query)
+
+@app.route('/stats', methods=['GET'])
+def get_stats():
+    """Get basic usage statistics."""
+    return jsonify({
+        'daily_usage': daily_usage_count
+    })
 
 @app.errorhandler(Exception)
 def handle_exception(e):
