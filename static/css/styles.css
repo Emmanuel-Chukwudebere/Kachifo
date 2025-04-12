@@ -186,8 +186,10 @@
     left: 0;
     right: 0;
     bottom: 0;
-    padding-top: 20px;
-    margin-top: 52px;
+    padding-top: 16px;
+    margin-top: 16px;
+    padding-bottom: 16px;
+    margin-bottom: 16px;
     display: flex;
     flex-direction: column;
     gap: 20px; /* Increased from 16px */
