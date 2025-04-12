@@ -29,20 +29,76 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"
 HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"
-HF_API_BOT_MODEL = "microsoft/phi-4"
+HF_API_BOT_MODEL = "mistralai/Mistral-7B-Instruct-v0.1"
 
 # Initialize HuggingFace inference clients
-try:
-    from huggingface_hub import InferenceClient
-    inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
-    inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
-    inference_bot = InferenceClient(model=HF_API_BOT_MODEL, token=HF_API_KEY)
-    logger.info("Successfully initialized HuggingFace inference clients")
-except Exception as e:
-    logger.error(f"Error initializing HuggingFace clients: {str(e)}")
-    inference_summary = None
-    inference_ner = None
-    inference_bot = None
+def initialize_inference_clients():
+    """Initialize HuggingFace inference clients with robust error handling."""
+    global inference_summary, inference_ner, inference_bot
+    
+    try:
+        from huggingface_hub import InferenceClient
+        
+        # Initialize the summary and NER models
+        try:
+            inference_summary = InferenceClient(model=HF_API_SUMMARY_MODEL, token=HF_API_KEY)
+            logger.info(f"Successfully initialized summary model: {HF_API_SUMMARY_MODEL}")
+        except Exception as sum_err:
+            logger.error(f"Error initializing summary model: {str(sum_err)}")
+            inference_summary = None
+            
+        try:
+            inference_ner = InferenceClient(model=HF_API_NER_MODEL, token=HF_API_KEY)
+            logger.info(f"Successfully initialized NER model: {HF_API_NER_MODEL}")
+        except Exception as ner_err:
+            logger.error(f"Error initializing NER model: {str(ner_err)}")
+            inference_ner = None
+        
+        # Initialize Mistral with fallbacks
+        mistral_models = [
+            "mistralai/Mistral-7B-Instruct-v0.1",
+            "mistralai/Mistral-7B-v0.1",
+            "facebook/opt-350m",  # Small fallback if Mistral is unavailable
+            "facebook/blenderbot-400M-distill"  # Last resort
+        ]
+        
+        for model in mistral_models:
+            try:
+                logger.info(f"Attempting to initialize conversational model: {model}")
+                inference_bot = InferenceClient(model=model, token=HF_API_KEY)
+                
+                # Test the model with a simple prompt
+                test_prompt = "Hello, how are you?"
+                if model.startswith("mistralai/Mistral"):
+                    # Format specifically for Mistral
+                    messages = [
+                        {"role": "user", "content": test_prompt}
+                    ]
+                    test_response = inference_bot.chat_completion(messages=messages, max_tokens=10)
+                else:
+                    # Generic format for other models
+                    test_response = inference_bot.text_generation(prompt=test_prompt, max_new_tokens=10)
+                
+                logger.info(f"Successfully initialized and tested model: {model}")
+                # Update the global variable to reflect the actual model used
+                global HF_API_BOT_MODEL
+                HF_API_BOT_MODEL = model
+                return True
+            except Exception as model_err:
+                logger.warning(f"Failed to initialize model {model}: {str(model_err)}")
+                continue
+                
+        # If we get here, all models failed
+        logger.error("All conversational models failed to initialize")
+        inference_bot = None
+        return False
+        
+    except Exception as e:
+        logger.error(f"Critical error initializing HuggingFace clients: {str(e)}")
+        inference_summary = None
+        inference_ner = None
+        inference_bot = None
+        return False
 
 def rate_limited(max_per_second: float):
     """Decorator to limit the rate at which a function can be called."""
@@ -181,7 +237,7 @@ def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
 def generate_conversational_response(user_input: str) -> str:
-    """Generate a conversational response using Microsoft phi-4."""
+    """Generate a conversational response using Mistral or fallback models."""
     if not user_input:
         return "I didn't receive any input. How can I help you today?"
         
@@ -191,55 +247,70 @@ def generate_conversational_response(user_input: str) -> str:
         if not inference_bot:
             return "Conversational service unavailable at the moment."
             
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful, engaging, and knowledgeable AI assistant. Respond naturally and conversationally."
-            },
-            {
-                "role": "user",
-                "content": user_input
-            }
-        ]
-        
-        # Use the proper API format
-        try:
-            # First try the chat completions format
-            response = inference_bot.chat_completion(messages=messages, max_tokens=150)
+        # Format the prompt based on which model we're using
+        if HF_API_BOT_MODEL.startswith("mistralai/Mistral"):
+            # Mistral specific format
+            messages = [
+                {
+                    "role": "user", 
+                    "content": user_input
+                }
+            ]
             
-            # Handle response formats
-            if isinstance(response, dict) and 'choices' in response:
-                # OpenAI-like format
-                content = response.get('choices', [{}])[0].get('message', {}).get('content', "")
-            elif isinstance(response, dict) and 'generated_text' in response:
-                # HF text generation format
-                content = response.get('generated_text', "")
-            elif isinstance(response, dict):
-                # Other dictionary format
-                content = str(response)
-            elif isinstance(response, str):
-                # Direct string response
-                content = response
-            else:
-                content = str(response) if response else ""
+            try:
+                # Use chat completion for Mistral
+                response = inference_bot.chat_completion(
+                    messages=messages, 
+                    max_tokens=200,
+                    temperature=0.7
+                )
                 
-        except Exception as chat_err:
-            logger.warning(f"Chat completion failed, trying text generation: {str(chat_err)}")
-            # Fallback to text generation
-            prompt = f"System: You are a helpful assistant.\nUser: {user_input}\nAssistant:"
-            response = inference_bot.text_generation(prompt=prompt, max_new_tokens=150)
+                # Extract content based on response format
+                if isinstance(response, dict):
+                    if 'choices' in response:
+                        # OpenAI-like format
+                        content = response.get('choices', [{}])[0].get('message', {}).get('content', "")
+                    elif 'generated_text' in response:
+                        content = response.get('generated_text', "")
+                    else:
+                        content = str(response)
+                else:
+                    content = str(response)
+                    
+            except Exception as chat_err:
+                logger.warning(f"Error using chat completion: {str(chat_err)}")
+                # Fallback to simple text completion
+                prompt = f"<s>[INST] {user_input} [/INST]"
+                response = inference_bot.text_generation(
+                    prompt=prompt, 
+                    max_new_tokens=200,
+                    temperature=0.7
+                )
+                content = response.get('generated_text', str(response))
+                # Remove the input prompt if it's included in the response
+                if content.startswith(prompt):
+                    content = content[len(prompt):].strip()
+        else:
+            # Generic format for other models
+            prompt = f"User: {user_input}\nAssistant:"
+            response = inference_bot.text_generation(
+                prompt=prompt, 
+                max_new_tokens=200,
+                temperature=0.7
+            )
             
             if isinstance(response, dict) and 'generated_text' in response:
-                content = response['generated_text'].split('Assistant:')[-1].strip()
-            elif isinstance(response, str):
-                content = response.split('Assistant:')[-1].strip()
+                content = response['generated_text']
+                # Extract just the assistant's response
+                if "Assistant:" in content:
+                    content = content.split("Assistant:")[-1].strip()
             else:
-                content = str(response) if response else ""
+                content = str(response)
         
         if not content:
-            raise ValueError("Received empty response from the chat model.")
+            raise ValueError("Received empty response from the model")
             
-        logger.info("Conversational response generated successfully.")
+        logger.info("Conversational response generated successfully")
         return content
     except Exception as e:
         logger.error(f"Error generating conversational response: {str(e)}", exc_info=True)
@@ -378,6 +449,9 @@ def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
     all_trends.extend(news_trends)
     
     return all_trends
+
+# Call the initialization function after all functions are defined
+initialize_inference_clients()
 
 # For direct testing
 if __name__ == "__main__":

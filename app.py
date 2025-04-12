@@ -12,7 +12,8 @@ from api_integrations import (
     summarize_with_hf,
     extract_entities_with_hf,
     generate_conversational_response,
-    generate_general_summary
+    generate_general_summary,
+    initialize_inference_clients
 )
 
 # Initialize Flask app
@@ -253,6 +254,10 @@ def handle_exception(e):
     return jsonify({
         'error': 'An unexpected error occurred. Please try again later.'
     }), 500
+
+# Initialize HuggingFace clients
+if not initialize_inference_clients():
+    logger.warning("Failed to initialize some or all HuggingFace models. Some features may be limited.")
 
 if __name__ == '__main__':
     # Get port from environment variable or use default
