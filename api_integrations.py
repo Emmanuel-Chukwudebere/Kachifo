@@ -306,8 +306,7 @@ def generate_conversational_response(user_input: str, conversation_history: List
                 
                 for i, msg in enumerate(mistral_messages):
                     if msg['role'] == 'user':
-                        prompt_parts.append(f"{msg['content']} 
-")
+                        prompt_parts.append(f"{msg['content']}")
                     elif msg['role'] == 'assistant' and i > 0:
                         prompt_parts.append(f"{msg['content']}")
                 
