@@ -29,7 +29,7 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"
 HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"
-HF_API_BOT_MODEL = "microsoft/phi-4/v1"
+HF_API_BOT_MODEL = "microsoft/phi-4"
 
 # Initialize HuggingFace inference clients
 try:
