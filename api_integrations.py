@@ -18,18 +18,22 @@ logger = logging.getLogger(__name__)
 # In-memory caches with TTL (Time-To-Live)
 summary_cache = TTLCache(maxsize=1000, ttl=3600)  # Cache summaries for 1 hour
 entity_cache = TTLCache(maxsize=1000, ttl=3600)   # Cache entities for 1 hour
+web_search_cache = TTLCache(maxsize=100, ttl=300)  # Cache web searches for 5 minutes
+analysis_cache = TTLCache(maxsize=500, ttl=1800)  # Cache analyses for 30 minutes
 
 # API keys loaded from environment variables
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
+SERP_API_KEY = os.getenv("SERP_API_KEY")
 
 # Hugging Face API configuration
 HF_API_KEY = os.getenv('HUGGINGFACE_API_KEY')
 HF_API_SUMMARY_MODEL = "facebook/bart-large-cnn"
 HF_API_NER_MODEL = "dbmdz/bert-large-cased-finetuned-conll03-english"
 HF_API_BOT_MODEL = "mistralai/Mistral-7B-Instruct-v0.1"
+HF_API_ANALYSIS_MODEL = "mistralai/Mistral-7B-Instruct-v0.1"  # Using Mistral for analysis too
 
 # Initialize HuggingFace inference clients
 def initialize_inference_clients():
@@ -236,7 +240,7 @@ def extract_entities_with_hf(text: str) -> Dict[str, List[str]]:
 
 @rate_limited(1.0)
 @retry_with_backoff(Exception, tries=3)
-def generate_conversational_response(user_input: str) -> str:
+def generate_conversational_response(user_input: str, conversation_history: List[Dict[str, str]] = None) -> str:
     """Generate a conversational response using Mistral or fallback models."""
     if not user_input:
         return "I didn't receive any input. How can I help you today?"
@@ -247,20 +251,37 @@ def generate_conversational_response(user_input: str) -> str:
         if not inference_bot:
             return "Conversational service unavailable at the moment."
             
+        # Use the conversation history if provided, or create a new conversation
+        if not conversation_history:
+            conversation_history = [
+                {'role': 'system', 'content': 'You are Kachifo, a helpful AI assistant specialized in discovering and analyzing trends. Always refer to yourself as Kachifo.'},
+                {'role': 'user', 'content': user_input}
+            ]
+        # If history exists but doesn't include the latest user input, add it
+        elif conversation_history[-1]['role'] != 'user' or conversation_history[-1]['content'] != user_input:
+            conversation_history.append({'role': 'user', 'content': user_input})
+            
         # Format the prompt based on which model we're using
         if HF_API_BOT_MODEL.startswith("mistralai/Mistral"):
-            # Mistral specific format
-            messages = [
-                {
-                    "role": "user", 
-                    "content": user_input
-                }
-            ]
+            # Mistral doesn't support system messages in the same way, so convert to a format it understands
+            mistral_messages = []
+            system_content = None
             
+            # Extract system message if present
+            for msg in conversation_history:
+                if msg['role'] == 'system':
+                    system_content = msg['content']
+                else:
+                    mistral_messages.append(msg)
+                    
+            # If there was a system message, prepend it to the first user message
+            if system_content and mistral_messages and mistral_messages[0]['role'] == 'user':
+                mistral_messages[0]['content'] = f"{system_content}\n\nUser: {mistral_messages[0]['content']}"
+                
             try:
                 # Use chat completion for Mistral
                 response = inference_bot.chat_completion(
-                    messages=messages, 
+                    messages=mistral_messages, 
                     max_tokens=200,
                     temperature=0.7
                 )
@@ -280,7 +301,18 @@ def generate_conversational_response(user_input: str) -> str:
             except Exception as chat_err:
                 logger.warning(f"Error using chat completion: {str(chat_err)}")
                 # Fallback to simple text completion
-                prompt = f"<s>[INST] {user_input} [/INST]"
+                # Build input text from conversation history
+                prompt_parts = []
+                
+                for i, msg in enumerate(mistral_messages):
+                    if msg['role'] == 'user':
+                        prompt_parts.append(f"{msg['content']} 
+")
+                    elif msg['role'] == 'assistant' and i > 0:
+                        prompt_parts.append(f"{msg['content']}")
+                
+                prompt = "".join(prompt_parts)
+                
                 response = inference_bot.text_generation(
                     prompt=prompt, 
                     max_new_tokens=200,
@@ -292,7 +324,20 @@ def generate_conversational_response(user_input: str) -> str:
                     content = content[len(prompt):].strip()
         else:
             # Generic format for other models
-            prompt = f"User: {user_input}\nAssistant:"
+            # Convert the conversation history to a single text prompt
+            prompt_parts = []
+            
+            for msg in conversation_history:
+                if msg['role'] == 'system':
+                    prompt_parts.append(f"System: {msg['content']}")
+                elif msg['role'] == 'user':
+                    prompt_parts.append(f"User: {msg['content']}")
+                elif msg['role'] == 'assistant':
+                    prompt_parts.append(f"Assistant: {msg['content']}")
+            
+            prompt_parts.append("Assistant:")
+            prompt = "\n".join(prompt_parts)
+            
             response = inference_bot.text_generation(
                 prompt=prompt, 
                 max_new_tokens=200,
@@ -311,6 +356,11 @@ def generate_conversational_response(user_input: str) -> str:
             raise ValueError("Received empty response from the model")
             
         logger.info("Conversational response generated successfully")
+        
+        # Ensure Kachifo personality if not already included
+        if "kachifo" not in content.lower() and not content.startswith("I am ") and not content.startswith("I'm "):
+            content = f"As Kachifo, {content}"
+            
         return content
     except Exception as e:
         logger.error(f"Error generating conversational response: {str(e)}", exc_info=True)
@@ -449,6 +499,116 @@ def fetch_trending_topics(query: str) -> List[Dict[str, Any]]:
     all_trends.extend(news_trends)
     
     return all_trends
+
+@rate_limited(1.0)
+@retry_with_backoff(Exception, tries=2)
+def perform_web_search(query: str) -> List[Dict[str, Any]]:
+    """Perform a web search using Google Custom Search API."""
+    # Check cache first
+    cache_key = f"web:{query}"
+    if cache_key in web_search_cache:
+        logger.info(f"Cache hit for web search: {query}")
+        return web_search_cache[cache_key]
+    
+    results = []
+    
+    # Use Google Custom Search API
+    if GOOGLE_API_KEY and GOOGLE_CSE_ID:
+        try:
+            logger.info(f"Performing Google search for: {query}")
+            url = f"https://www.googleapis.com/customsearch/v1?q={query}&cx={GOOGLE_CSE_ID}&key={GOOGLE_API_KEY}&num=5"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            if "items" in data:
+                for item in data["items"]:
+                    results.append({
+                        "title": item.get("title", ""),
+                        "link": item.get("link", ""),
+                        "snippet": item.get("snippet", "")
+                    })
+        except Exception as e:
+            logger.error(f"Google search failed: {str(e)}")
+    else:
+        logger.error("Google API key or CSE ID not configured for web search")
+    
+    # If no results, provide a fallback response
+    if not results:
+        logger.warning(f"No search results found for: {query}")
+        results = [{
+            "title": "No search results found",
+            "link": "#",
+            "snippet": f"Unable to find web search results for '{query}'. Please try a different query or check your Google API configuration."
+        }]
+    
+    web_search_cache[cache_key] = results
+    return results
+
+@rate_limited(1.0)
+@retry_with_backoff(Exception, tries=3)
+def analyze_content(topic: str, content_list: List[str]) -> str:
+    """Analyze a list of content pieces about a specific topic."""
+    if not content_list:
+        return f"I don't have any information to analyze about '{topic}'."
+    
+    # Check cache
+    cache_key = f"analysis:{topic}:{hash(str(content_list))}"
+    if cache_key in analysis_cache:
+        logger.info(f"Cache hit for analysis: {topic}")
+        return analysis_cache[cache_key]
+    
+    try:
+        logger.info(f"Analyzing content about: {topic}")
+        
+        if not inference_bot:
+            return f"Analysis service is unavailable at the moment. I can't provide an analysis for '{topic}'."
+        
+        # Prepare the content for analysis
+        combined_content = "\n\n".join(content_list)
+        # Truncate if too long
+        if len(combined_content) > 4000:
+            combined_content = combined_content[:4000] + "..."
+        
+        # Create prompt for the analysis
+        prompt = f"""As Kachifo, analyze the following information about "{topic}" and provide a comprehensive analysis. 
+        Include insights about key trends, patterns, significant factors, and potential implications.
+        
+        Here's the information to analyze:
+        
+        {combined_content}
+        
+        Provide a well-structured analysis with clear sections and insights.
+        Remember to introduce yourself as Kachifo in your response. 
+"""
+        
+        # Use text generation for analysis
+        response = inference_bot.text_generation(
+            prompt=prompt,
+            max_new_tokens=800,  # Allow for longer analysis
+            temperature=0.7,
+            top_p=0.9
+        )
+        
+        # Process the response
+        if isinstance(response, dict) and 'generated_text' in response:
+            analysis = response['generated_text']
+            # Remove the prompt from the response if present
+            if prompt in analysis:
+                analysis = analysis[len(prompt):].strip()
+        else:
+            analysis = str(response)
+        
+        if not analysis:
+            analysis = f"I couldn't generate a meaningful analysis about '{topic}' with the provided information."
+        
+        # Cache the result
+        analysis_cache[cache_key] = analysis
+        return analysis
+        
+    except Exception as e:
+        logger.error(f"Error analyzing content: {str(e)}", exc_info=True)
+        return f"I encountered an issue while analyzing information about '{topic}'. Please try again later."
 
 # Call the initialization function after all functions are defined
 initialize_inference_clients()

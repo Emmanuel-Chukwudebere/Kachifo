@@ -28,7 +28,7 @@
         <div class="brand-logo">
             <!-- Optional: Add small logo here for persistent branding -->
         </div>
-        <div class="new-chat-icon" title="Start a new chat">
+        <div class="new-chat-icon" title="Start a new chat" id="new-chat-icon">
             <img src="{{ url_for('static', filename='icons/chat-24-regular.svg') }}" alt="New Chat">
         </div>
     </header>
@@ -65,10 +65,12 @@
     </main>
 
     <footer class="input-container">
-        <textarea id="user-input" placeholder="Discover trends ↝" rows="1"></textarea>
-        <button id="send-btn" title="Send message">
-            <img src="{{ url_for('static', filename='icons/send-24-regular.svg') }}" alt="Send Icon">
-        </button>
+        <div class="input-wrapper">
+            <textarea id="user-input" placeholder="Discover trends ↝" rows="1"></textarea>
+            <button id="send-btn" title="Send message">
+                <img src="{{ url_for('static', filename='icons/send-24-regular.svg') }}" alt="Send Icon">
+            </button>
+        </div>
     </footer>
 
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>

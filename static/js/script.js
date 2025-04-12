@@ -17,7 +17,7 @@ function initApplication() {
     chatWindow: document.querySelector('.chat-window'),
     initialView: document.querySelector('.initial-view'),
     suggestions: document.querySelector('.suggestions'),
-    newChatIcon: document.getElementById('new-chat-icon')
+    newChatIcon: document.querySelector('.new-chat-icon')
   };
 
   // Log which elements were found/not found for debugging
@@ -223,7 +223,10 @@ function initApplication() {
     fetch('/interact', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: message })
+      body: JSON.stringify({ 
+        input: message,
+        session_id: sessionStorage.getItem('session_id') || ''
+      })
     })
     .then(response => {
       if (!response.ok) {
@@ -233,6 +236,11 @@ function initApplication() {
     })
     .then(data => {
       clearInterval(loadingInterval);
+      
+      // Save session_id if provided
+      if (data.session_id) {
+        sessionStorage.setItem('session_id', data.session_id);
+      }
       
       // Determine which response field to use
       let displayText = data.response || data.general_summary || '';
@@ -325,27 +333,57 @@ function initApplication() {
   };
 
   /**
-   * Reset the chat window for a new conversation
+   * Reset the chat to initial state
+   * Clears conversation and shows initial view
    */
   const resetChat = () => {
-    // Safety checks for all required elements
-    if (!elements.chatWindow || !elements.initialView || !elements.suggestions) {
-      console.error("Missing required elements for resetChat");
-      return;
+    // Clear the chat window
+    if (elements.chatWindow) {
+      elements.chatWindow.innerHTML = '';
+      elements.chatWindow.classList.remove('active');
     }
     
-    elements.chatWindow.innerHTML = '';
-    elements.initialView.classList.remove('hidden');
-    elements.suggestions.classList.remove('hidden');
-    elements.chatWindow.classList.remove('active');
+    // Show initial view
+    if (elements.initialView) {
+      elements.initialView.style.display = 'flex';
+      elements.initialView.classList.remove('hidden');
+      
+      // Use a timeout to trigger fade-in animation
+      setTimeout(() => {
+        elements.initialView.style.opacity = '1';
+        elements.initialView.style.transform = 'translateY(0)';
+      }, 10);
+    }
     
+    // Show suggestions
+    if (elements.suggestions) {
+      elements.suggestions.classList.remove('hidden');
+      
+      // Reset the state to display the suggestions
+      setTimeout(() => {
+        elements.suggestions.style.opacity = '1';
+        elements.suggestions.style.transform = 'translateY(0)';
+      }, 10);
+    }
+    
+    // Clear the user input
     if (elements.userInput) {
       elements.userInput.value = '';
-      elements.userInput.style.height = 'auto';
+      elements.userInput.style.height = '';
+      elements.userInput.focus();
     }
     
-    scrollToBottom();
-    attachSuggestionListeners();
+    // Clear any session data from the server
+    fetch('/clear-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        clear_session: true,
+        session_id: sessionStorage.getItem('session_id') || '' 
+      })
+    }).catch(error => console.error('Error clearing session:', error));
+    
+    console.log("Chat reset to initial state");
   };
 
   /**
@@ -425,72 +463,87 @@ function initApplication() {
   const debouncedResizeInput = debounce(resizeInput, CONFIG.typingInterval);
 
   /**
-   * Initialize event listeners
+   * Initialize all event listeners
    */
   const initEventListeners = () => {
-    console.log("Initializing event listeners...");
-    
-    // Send button click
-    if (elements.sendBtn) {
-      elements.sendBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        sendMessage();
-        console.log("Send button clicked");
-      });
-      console.log("Send button listener attached");
-    } else {
-      console.warn("Send button element not found");
-    }
-    
-    // Input field events
+    // Input submit event handling
     if (elements.userInput) {
-      // Enter key press (desktop only)
-      elements.userInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && window.innerWidth >= 1024) {
+      elements.userInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          sendMessage();
-          console.log("Enter key pressed");
+          const message = elements.userInput.value.trim();
+          if (message) {
+            sendMessage(message);
+            elements.userInput.value = '';
+            elements.userInput.style.height = '';
+          }
         }
       });
       
-      // Auto-resize on input - bind context properly
-      elements.userInput.addEventListener('input', function(e) {
-        debouncedResizeInput.call(this, e);
-      });
-      
-      console.log("Input field listeners attached");
-    } else {
-      console.warn("User input element not found");
+      // Auto-resize as user types
+      elements.userInput.addEventListener('input', debounce(resizeInput, CONFIG.typingInterval));
     }
     
-    // New chat icon - using event delegation
-    if (elements.newChatIcon) {
-      elements.newChatIcon.addEventListener('click', (e) => {
-        e.preventDefault();
-        resetChat();
-        console.log("New chat icon clicked");
+    // Send button click
+    if (elements.sendBtn) {
+      elements.sendBtn.addEventListener('click', () => {
+        const message = elements.userInput.value.trim();
+        if (message) {
+          sendMessage(message);
+          elements.userInput.value = '';
+          elements.userInput.style.height = '';
+        }
       });
-      console.log("New chat icon listener attached");
-    } else {
-      console.warn("New chat icon element not found");
     }
     
-    // Add listener for suggestions using event delegation
+    // Attach suggestion click listeners
     attachSuggestionListeners();
     
-    // Global error handling
-    window.addEventListener('unhandledrejection', (event) => {
-      console.error('Unhandled promise rejection:', event.reason);
-    });
+    // New chat icon - reset chat state
+    if (elements.newChatIcon) {
+      elements.newChatIcon.addEventListener('click', () => {
+        console.log("New chat icon clicked");
+        resetChat();
+      });
+    }
     
-    window.onerror = (message, source, lineno, colno, error) => {
-      console.error('Global error:', message, 'at', source, lineno, colno, error);
-    };
+    // Focus input field on page load
+    setTimeout(() => {
+      if (elements.userInput) {
+        elements.userInput.focus();
+      }
+    }, 1000);
+  };
+
+  /**
+   * Initialize or retrieve session ID
+   * Ensures we have a persistent session ID for the conversation
+   */
+  const initSession = () => {
+    // Check if we already have a session ID in storage
+    let sessionId = sessionStorage.getItem('session_id');
     
-    console.log("All event listeners initialized");
+    // If no session ID exists, create a new one
+    if (!sessionId) {
+      // Generate a simple UUID v4
+      sessionId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+      
+      // Save it to session storage
+      sessionStorage.setItem('session_id', sessionId);
+      console.log("New session initialized:", sessionId);
+    } else {
+      console.log("Existing session retrieved:", sessionId);
+    }
+    
+    return sessionId;
   };
 
   // Start the application by initializing event listeners
+  initSession();
   initEventListeners();
   console.log("Kachifo chat interface initialized");
 }

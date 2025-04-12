@@ -1,7 +1,11 @@
 import os
 import logging
 import re
-from flask import Flask, request, jsonify, render_template
+import uuid
+import time
+import json
+from datetime import datetime
+from flask import Flask, request, jsonify, render_template, session
 from flask_caching import Cache
 from flask_talisman import Talisman
 from functools import wraps
@@ -13,11 +17,14 @@ from api_integrations import (
     extract_entities_with_hf,
     generate_conversational_response,
     generate_general_summary,
-    initialize_inference_clients
+    initialize_inference_clients,
+    perform_web_search,
+    analyze_content
 )
 
 # Initialize Flask app
 app = Flask(__name__)
+app.secret_key = os.getenv('SECRET_KEY', os.urandom(24).hex())
 
 # Enable HTTPS with secure headers
 Talisman(app, content_security_policy={
@@ -36,6 +43,9 @@ cache = Cache(app)
 
 # Initialize usage statistics
 daily_usage_count = 0
+
+# Conversation history storage
+conversation_store = {}
 
 def setup_logging():
     """Configure application logging."""
@@ -115,31 +125,110 @@ def sanitize_input(query):
     logger.info(f"Sanitized input: {sanitized}")
     return sanitized
 
-def classify_input_type(user_input):
-    """Determine if the input is a search query or conversational."""
+def classify_input_type(user_input, conversation_history=None):
+    """Determine if the input is a search query, analysis request, or conversational."""
     if not user_input:
         return 'conversation'
+    
+    # Check for follow-up questions if we have conversation history
+    if conversation_history and len(conversation_history) > 1:
+        prev_query = conversation_history[-2].get('content', '')
+        prev_response = conversation_history[-1].get('content', '')
         
-    # Patterns suggesting a search or query intention
+        # Common follow-up patterns
+        followup_patterns = [
+            r'\b(more|tell me more|continue|elaborate|explain further|can you explain|what about)\b',
+            r'\b(why|how|what|when|where|who)\b',
+            r'\b(thanks|thank you|got it)\b'
+        ]
+        
+        for pattern in followup_patterns:
+            if re.search(pattern, user_input, re.IGNORECASE):
+                if 'query' in prev_query.lower() or 'search' in prev_query.lower():
+                    return 'query'
+                elif 'analyze' in prev_query.lower() or 'analysis' in prev_query.lower():
+                    return 'analysis'
+        
+    # Patterns suggesting a search query intention
     query_pattern = re.compile(
         r'\b(search|find|look up|what is|tell me about|trending|give me|show me)\b', 
         re.IGNORECASE
     )
     
-    if query_pattern.search(user_input):
+    # Patterns suggesting an analysis request
+    analysis_pattern = re.compile(
+        r'\b(analyze|analysis|evaluate|review|compare|summarize|insights|opinion|thoughts on)\b',
+        re.IGNORECASE
+    )
+    
+    # Web search pattern
+    web_search_pattern = re.compile(
+        r'\b(web search|google|search online|current|latest|today|live|news|recent)\b',
+        re.IGNORECASE
+    )
+    
+    if web_search_pattern.search(user_input):
+        return 'web_search'
+    elif analysis_pattern.search(user_input):
+        return 'analysis'
+    elif query_pattern.search(user_input):
         return 'query'
+    
     return 'conversation'
+
+def get_conversation_history(session_id):
+    """Retrieve conversation history for a session."""
+    # Clean up old conversations (older than 24 hours)
+    current_time = time.time()
+    expired_keys = []
+    
+    for key, data in conversation_store.items():
+        if current_time - data.get('last_updated', 0) > 86400:  # 24 hours
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        conversation_store.pop(key, None)
+    
+    # Get or create conversation history
+    if session_id not in conversation_store:
+        conversation_store[session_id] = {
+            'history': [
+                {'role': 'system', 'content': 'You are Kachifo, a helpful AI assistant specialized in discovering and analyzing trends. Always refer to yourself as Kachifo.'}
+            ],
+            'last_updated': current_time
+        }
+    else:
+        conversation_store[session_id]['last_updated'] = current_time
+        
+    return conversation_store[session_id]['history']
+
+def update_conversation_history(session_id, role, content):
+    """Add a message to the conversation history."""
+    history = get_conversation_history(session_id)
+    history.append({'role': role, 'content': content})
+    
+    # Keep only the last 10 messages to prevent the history from growing too large
+    if len(history) > 11:  # 1 system + 10 messages
+        history.pop(1)  # Remove the oldest message (but keep the system message)
+    
+    conversation_store[session_id]['last_updated'] = time.time()
+    return history
 
 @app.route('/')
 def home():
     """Serve the main application page."""
     logger.info("Home page accessed")
+    
+    # Generate a session ID if not present
+    if 'session_id' not in session:
+        session['session_id'] = str(uuid.uuid4())
+    
     return render_template('index.html', message="Welcome to Kachifo - Discover trends")
 
 @app.route('/interact', methods=['POST'])
 @rate_limit
 def interact():
-    """Main interaction endpoint for handling both queries and conversations."""
+    """Main interaction endpoint for handling queries, analysis, and conversations."""
     global daily_usage_count
     daily_usage_count += 1
     
@@ -150,25 +239,206 @@ def interact():
     user_input = data.get('input', '').strip()
     if not user_input:
         return jsonify({'error': 'No input provided'}), 400
-
-    # Classify the input type
-    input_type = classify_input_type(user_input)
+    
+    # Get or create session ID
+    client_session_id = data.get('session_id')
+    
+    # If client provided a session ID and it's valid (exists in our store)
+    if client_session_id and client_session_id in conversation_store:
+        session_id = client_session_id
+    else:
+        # Generate a new session ID if none provided or invalid
+        session_id = str(uuid.uuid4())
+        
+    # If it's a new session, store it in the server session too
+    if 'session_id' not in session:
+        session['session_id'] = session_id
+    
+    # Get conversation history
+    conversation_history = get_conversation_history(session_id)
+    
+    # Add user message to history
+    update_conversation_history(session_id, 'user', user_input)
+    
+    # Classify the input type using conversation context
+    input_type = classify_input_type(user_input, conversation_history)
     
     try:
-        if input_type == 'conversation':
-            # Handle conversational input
-            response_text = generate_conversational_response(user_input)
-            logger.info("Conversational response generated")
-            return jsonify({'response': response_text})
-        else:
+        if input_type == 'web_search':
+            # Handle web search request
+            logger.info(f"Processing web search: {user_input}")
+            response = process_web_search(user_input, session_id)
+            
+        elif input_type == 'analysis':
+            # Handle analysis request
+            logger.info(f"Processing analysis: {user_input}")
+            response = process_analysis(user_input, session_id)
+            
+        elif input_type == 'query':
             # Handle search query
             logger.info(f"Processing search query: {user_input}")
-            return process_search_query(user_input)
+            response = process_search_query(user_input, session_id)
+            
+        else:
+            # Handle conversational input
+            logger.info(f"Processing conversation: {user_input}")
+            response_text = generate_conversational_response(user_input, conversation_history)
+            
+            # Add assistant response to history
+            update_conversation_history(session_id, 'assistant', response_text)
+            
+            response = jsonify({
+                'response': response_text,
+                'session_id': session_id,
+                'type': 'conversation'
+            })
+        
+        return response
+        
     except Exception as e:
         logger.error(f"Error in /interact: {str(e)}", exc_info=True)
-        return jsonify({'error': 'An unexpected error occurred'}), 500
+        
+        # Handle different types of errors gracefully
+        error_message = "I'm sorry, I encountered an issue processing your request."
+        
+        if "API" in str(e) or "timeout" in str(e).lower():
+            error_message = "I'm having trouble connecting to one of my sources. Please try again in a moment."
+        elif "model" in str(e).lower():
+            error_message = "I'm having trouble with my thinking process. Let me try a different approach next time."
+        
+        # Add error response to conversation history
+        update_conversation_history(session_id, 'assistant', error_message)
+        
+        return jsonify({
+            'response': error_message,
+            'error': str(e),
+            'session_id': session_id,
+            'type': 'error'
+        }), 500
 
-def process_search_query(query):
+def process_web_search(query, session_id=None):
+    """Process a web search query and return real-time results."""
+    # Try to get from cache first (with short expiration)
+    cache_key = f"web_search:{query}"
+    cached_results = cache.get(cache_key)
+    
+    if cached_results:
+        logger.info(f"Cache hit for web search: {query}")
+        
+        # Add response to conversation history if session exists
+        if session_id:
+            update_conversation_history(session_id, 'assistant', cached_results['summary'])
+            
+        return jsonify(cached_results)
+    
+    # If not in cache, perform web search
+    try:
+        search_results = perform_web_search(query)
+        
+        # Create a summary from the search results
+        result_texts = [result.get('snippet', '') for result in search_results]
+        summary = generate_general_summary(result_texts)
+        
+        # Format for a user-friendly response
+        formatted_results = []
+        for result in search_results:
+            formatted_results.append({
+                'title': result.get('title', 'No title'),
+                'url': result.get('link', '#'),
+                'snippet': result.get('snippet', 'No description available')
+            })
+        
+        response_text = f"Here's what I found online about '{query}':\n\n{summary}\n\n"
+        
+        final_response = {
+            'query': query,
+            'results': formatted_results, 
+            'summary': response_text,
+            'session_id': session_id,
+            'type': 'web_search'
+        }
+        
+        # Cache for a short time (5 minutes)
+        cache.set(cache_key, final_response, timeout=300)
+        
+        # Add response to conversation history if session exists
+        if session_id:
+            update_conversation_history(session_id, 'assistant', response_text)
+        
+        return jsonify(final_response)
+        
+    except Exception as e:
+        logger.error(f"Error in web search: {str(e)}", exc_info=True)
+        error_message = f"I had trouble searching the web for '{query}'. Please try a different query or try again later."
+        
+        if session_id:
+            update_conversation_history(session_id, 'assistant', error_message)
+            
+        return jsonify({
+            'error': error_message,
+            'session_id': session_id,
+            'type': 'error'
+        }), 500
+
+def process_analysis(query, session_id=None):
+    """Process an analysis request on a topic."""
+    # Try cache first
+    cache_key = f"analysis:{query}"
+    cached_results = cache.get(cache_key)
+    
+    if cached_results:
+        logger.info(f"Cache hit for analysis: {query}")
+        
+        # Add response to conversation history if session exists
+        if session_id:
+            update_conversation_history(session_id, 'assistant', cached_results['analysis'])
+            
+        return jsonify(cached_results)
+    
+    # First get trend data
+    trend_data = fetch_trending_topics(query)
+    
+    # If we have no trend data, try a web search
+    if not trend_data:
+        logger.info(f"No trend data found, attempting web search for: {query}")
+        search_results = perform_web_search(query)
+        
+        if search_results:
+            # Extract snippets to analyze
+            snippets = [result.get('snippet', '') for result in search_results]
+            analysis_text = analyze_content(query, snippets)
+        else:
+            analysis_text = f"I couldn't find any recent information to analyze about '{query}'."
+    else:
+        # Prepare content for analysis from trend data
+        content_to_analyze = []
+        for item in trend_data:
+            title = item.get('title', '')
+            summary = item.get('summary', '')
+            content_to_analyze.append(f"{title}: {summary}")
+        
+        # Perform analysis
+        analysis_text = analyze_content(query, content_to_analyze)
+    
+    # Create response format
+    response_data = {
+        'query': query,
+        'analysis': analysis_text,
+        'timestamp': datetime.now().isoformat(),
+        'session_id': session_id,
+        'type': 'analysis'
+    }
+    
+    # Cache the results
+    cache.set(cache_key, response_data, timeout=1800)  # Cache for 30 minutes
+    
+    # Add to conversation history if session exists
+    if session_id:
+        update_conversation_history(session_id, 'assistant', analysis_text)
+    
+    return jsonify(response_data)
+
+def process_search_query(query, session_id=None):
     """Process a search query and return results with summaries."""
     # Try to get from cache first
     cache_key = f"search_query:{query}"
@@ -176,6 +446,12 @@ def process_search_query(query):
     
     if cached_results:
         logger.info(f"Cache hit for query: {query}")
+        
+        # Add to conversation history if session exists
+        if session_id and 'general_summary' in cached_results:
+            update_conversation_history(session_id, 'assistant', 
+                f"Here's what I found about '{query}':\n\n{cached_results['general_summary']}")
+            
         return jsonify(cached_results)
     
     # If not in cache, fetch new results
@@ -204,15 +480,24 @@ def process_search_query(query):
     # Generate overall summary
     general_summary = generate_general_summary(individual_summaries)
     
+    # Add Kachifo personality to the summary
+    personalized_summary = f"Here's what I found about '{query}':\n\n{general_summary}"
+    
     # Prepare response
     final_response = {
         'query': query,
         'results': processed_results,
-        'general_summary': general_summary
+        'general_summary': personalized_summary,
+        'session_id': session_id,
+        'type': 'query'
     }
     
     # Cache the results
     cache.set(cache_key, final_response, timeout=1800)  # Cache for 30 minutes
+    
+    # Add to conversation history if session exists
+    if session_id:
+        update_conversation_history(session_id, 'assistant', personalized_summary)
     
     return jsonify(final_response)
 
@@ -223,23 +508,94 @@ def search_trends():
     # Handle both GET and POST requests
     if request.method == 'GET':
         query = request.args.get('q', '')
+        session_id = request.args.get('session_id', None)
     else:
         data = request.get_json()
-        query = data.get('q', '') if data else ''
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
+        query = data.get('q', '')
+        session_id = data.get('session_id', None)
     
     if not query:
         return jsonify({'error': 'Query parameter "q" is required'}), 400
     
     # Sanitize input and process query
     query = sanitize_input(query)
-    return process_search_query(query)
+    return process_search_query(query, session_id)
+
+@app.route('/analyze', methods=['GET', 'POST'])
+@rate_limit
+def analyze_trends():
+    """API endpoint for analyzing trends."""
+    # Handle both GET and POST requests
+    if request.method == 'GET':
+        query = request.args.get('q', '')
+        session_id = request.args.get('session_id', None)
+    else:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
+        query = data.get('q', '')
+        session_id = data.get('session_id', None)
+    
+    if not query:
+        return jsonify({'error': 'Query parameter "q" is required'}), 400
+    
+    # Sanitize input and process for analysis
+    query = sanitize_input(query)
+    return process_analysis(query, session_id)
+
+@app.route('/web-search', methods=['GET', 'POST'])
+@rate_limit
+def web_search():
+    """API endpoint for web search."""
+    # Handle both GET and POST requests
+    if request.method == 'GET':
+        query = request.args.get('q', '')
+        session_id = request.args.get('session_id', None)
+    else:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
+        query = data.get('q', '')
+        session_id = data.get('session_id', None)
+    
+    if not query:
+        return jsonify({'error': 'Query parameter "q" is required'}), 400
+    
+    # Sanitize input and process web search
+    query = sanitize_input(query)
+    return process_web_search(query, session_id)
 
 @app.route('/stats', methods=['GET'])
 def get_stats():
     """Get basic usage statistics."""
     return jsonify({
-        'daily_usage': daily_usage_count
+        'daily_usage': daily_usage_count,
+        'active_conversations': len(conversation_store)
     })
+
+@app.route('/clear-history', methods=['POST'])
+def clear_history():
+    """Clear conversation history for a session."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+        
+    session_id = data.get('session_id', session.get('session_id'))
+    
+    if not session_id or session_id not in conversation_store:
+        return jsonify({'success': True, 'message': 'No active session found'})
+    
+    # Clear history but keep system message
+    system_message = conversation_store[session_id]['history'][0]
+    conversation_store[session_id]['history'] = [system_message]
+    conversation_store[session_id]['last_updated'] = time.time()
+    
+    return jsonify({'success': True, 'message': 'Conversation history cleared'})
 
 @app.errorhandler(Exception)
 def handle_exception(e):
@@ -250,9 +606,10 @@ def handle_exception(e):
     # Log unexpected errors
     logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
     
-    # Return user-friendly error
+    # Return user-friendly error with Kachifo personality
     return jsonify({
-        'error': 'An unexpected error occurred. Please try again later.'
+        'error': "I'm sorry, I ran into an unexpected issue. Please try again in a moment.",
+        'type': 'error'
     }), 500
 
 # Initialize HuggingFace clients
