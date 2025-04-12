@@ -159,13 +159,8 @@ def generate_general_summary(individual_summaries: List[str]) -> str:
         Text to summarize: {combined_text}
         """
             
-        response = inference_summary.summarization(
-            combined_text,
-            max_length=2000,  # Allow for longer summaries
-            min_length=300,   # Ensure a minimum amount of content
-            do_sample=True,
-            temperature=0.7   # Slightly higher temperature for more varied output
-        )
+        # Fix: Remove unsupported parameters and use parameters consistent with summarize_with_hf
+        response = inference_summary.summarization(enhanced_prompt)
         
         # Handle different response formats
         if isinstance(response, str):
@@ -298,7 +293,7 @@ def generate_conversational_response(user_input: str, conversation_history: List
                 # Use chat completion for Mistral
                 response = inference_bot.chat_completion(
                     messages=mistral_messages, 
-                    max_tokens=4000,  # Increased from 2000 to get more complete responses
+                    max_tokens=4000,  # Use appropriate parameters
                     temperature=0.7
                 )
                 
@@ -316,30 +311,35 @@ def generate_conversational_response(user_input: str, conversation_history: List
                     
             except Exception as chat_err:
                 logger.warning(f"Error using chat completion: {str(chat_err)}")
-                # Fallback to simple text completion
-                # Build input text from conversation history
+                # Fallback to simple text completion with cleaner prompt handling
                 prompt_parts = []
+                
+                if system_content:
+                    prompt_parts.append(f"System: {system_content}")
                 
                 for i, msg in enumerate(mistral_messages):
                     if msg['role'] == 'user':
-                        prompt_parts.append(f"{msg['content']}")
-                    elif msg['role'] == 'assistant' and i > 0:
-                        prompt_parts.append(f"{msg['content']}")
+                        prompt_parts.append(f"User: {msg['content']}")
+                    elif msg['role'] == 'assistant':
+                        prompt_parts.append(f"Assistant: {msg['content']}")
                 
-                prompt = "".join(prompt_parts)
+                prompt_parts.append("Assistant:")  # Add a clear signal for the model's response
+                prompt = "\n".join(prompt_parts)
                 
                 response = inference_bot.text_generation(
                     prompt=prompt, 
-                    max_new_tokens=4000,  # Increased from 2000 to get more complete responses
+                    max_new_tokens=4000,
                     temperature=0.7
                 )
-                content = response.get('generated_text', str(response))
-                # Remove the input prompt if it's included in the response
-                if content.startswith(prompt):
-                    content = content[len(prompt):].strip()
+                content = response if isinstance(response, str) else response.get('generated_text', str(response))
+                
+                # Better response extraction
+                if "Assistant:" in content:
+                    parts = content.split("Assistant:")
+                    # Get the last occurrence of "Assistant:" and its content
+                    content = parts[-1].strip()
         else:
-            # Generic format for other models
-            # Convert the conversation history to a single text prompt
+            # Generic format for other models with better prompt formatting
             prompt_parts = []
             
             for msg in conversation_history:
@@ -355,15 +355,16 @@ def generate_conversational_response(user_input: str, conversation_history: List
             
             response = inference_bot.text_generation(
                 prompt=prompt, 
-                max_new_tokens=4000,  # Increased from 2000 to get more complete responses
+                max_new_tokens=4000,
                 temperature=0.7
             )
             
             if isinstance(response, dict) and 'generated_text' in response:
                 content = response['generated_text']
-                # Extract just the assistant's response
+                # Better extraction of just the assistant's response
                 if "Assistant:" in content:
-                    content = content.split("Assistant:")[-1].strip()
+                    parts = content.split("Assistant:")
+                    content = parts[-1].strip()
             else:
                 content = str(response)
         
@@ -372,7 +373,7 @@ def generate_conversational_response(user_input: str, conversation_history: List
             
         logger.info("Conversational response generated successfully")
         
-        # Ensure response doesn't start with Kachifo prefix
+        # Cleaner regex to remove bot name prefixes
         content = re.sub(r'^(Kachifo:|As Kachifo,|I am Kachifo,|I\'m Kachifo,)\s*', '', content.strip())
             
         return content
@@ -584,42 +585,80 @@ def analyze_content(topic: str, content_list: List[str]) -> str:
         if len(combined_content) > 6000:  # Increased from 4000
             combined_content = combined_content[:6000] + "..."
         
-        # Create a more detailed prompt for analysis
-        prompt = f"""As Kachifo, analyze the following information about "{topic}" and provide a comprehensive, intelligible analysis. 
+        # Improved, more structured prompt for analysis
+        prompt = f"""As an AI assistant, analyze the following information about "{topic}" and provide a comprehensive, intelligible analysis.
         
-        Include:
-        1. Key trends and patterns identified in the data
-        2. Significant factors and their implications
-        3. Supporting evidence and specific examples
-        4. Context and relevance to current events or industry standards
-        5. Any relevant statistics, quotes, or expert opinions
-        6. Clear section headings and logical structure
-        7. All relevant links and sources where available
-        
-        Here's the information to analyze:
+        Here is the data to analyze:
         
         {combined_content}
         
-        Provide a thorough analysis that is well-structured, with proper transitions between ideas, and ensure all important details are included.
-        Make sure to include ALL links and references from the original content in your analysis.
+        Your analysis should:
+        1. Identify key trends and patterns in the data
+        2. Explain significant factors and their implications
+        3. Provide supporting evidence and specific examples
+        4. Add context and relevance to current events or industry standards
+        5. Include relevant statistics, quotes, or expert opinions
+        6. Use clear section headings and logical structure
+        7. Reference all relevant links and sources
+        
+        Make your analysis thorough, well-structured, with proper transitions between ideas, ensuring all important details are included.
+        Include ALL links and references from the original content.
         """
         
-        # Use text generation for analysis with higher token count
-        response = inference_bot.text_generation(
-            prompt=prompt,
-            max_new_tokens=3000,  # Increased from 800 for much longer analysis
-            temperature=0.7,
-            top_p=0.9
-        )
-        
-        # Process the response
-        if isinstance(response, dict) and 'generated_text' in response:
-            analysis = response['generated_text']
-            # Remove the prompt from the response if present
-            if prompt in analysis:
-                analysis = analysis[len(prompt):].strip()
+        # Use the appropriate method and parameters based on model type
+        if HF_API_BOT_MODEL.startswith("mistralai/Mistral"):
+            try:
+                # First try chat completion
+                messages = [
+                    {"role": "user", "content": prompt}
+                ]
+                response = inference_bot.chat_completion(
+                    messages=messages,
+                    max_tokens=4000,
+                    temperature=0.7
+                )
+                
+                if isinstance(response, dict):
+                    if 'choices' in response:
+                        analysis = response.get('choices', [{}])[0].get('message', {}).get('content', "")
+                    elif 'generated_text' in response:
+                        analysis = response.get('generated_text', "")
+                    else:
+                        analysis = str(response)
+                else:
+                    analysis = str(response)
+                    
+            except Exception as chat_err:
+                logger.warning(f"Chat completion failed for analysis: {str(chat_err)}")
+                # Fall back to text generation
+                response = inference_bot.text_generation(
+                    prompt=prompt,
+                    max_new_tokens=4000,
+                    temperature=0.7
+                )
+                
+                if isinstance(response, dict) and 'generated_text' in response:
+                    analysis = response['generated_text']
+                    # Remove the prompt from the response if present
+                    if prompt in analysis:
+                        analysis = analysis[len(prompt):].strip()
+                else:
+                    analysis = str(response)
         else:
-            analysis = str(response)
+            # For non-Mistral models
+            response = inference_bot.text_generation(
+                prompt=prompt,
+                max_new_tokens=4000,
+                temperature=0.7
+            )
+            
+            if isinstance(response, dict) and 'generated_text' in response:
+                analysis = response['generated_text']
+                # Remove the prompt from the response if present
+                if prompt in analysis:
+                    analysis = analysis[len(prompt):].strip()
+            else:
+                analysis = str(response)
         
         if not analysis:
             analysis = f"I couldn't generate a meaningful analysis about '{topic}' with the provided information."
@@ -632,11 +671,11 @@ def analyze_content(topic: str, content_list: List[str]) -> str:
             urls.extend(url_pattern.findall(content_piece))
         
         # Add missing URLs to the analysis if they're not already included
-        if urls and not any(url in analysis for url in urls):
+        missing_urls = [url for url in urls if url not in analysis]
+        if missing_urls:
             analysis += "\n\nRelevant links:\n"
-            for url in urls:
-                if url not in analysis:
-                    analysis += f"- {url}\n"
+            for url in missing_urls:
+                analysis += f"- {url}\n"
         
         # Cache the result
         analysis_cache[cache_key] = analysis
