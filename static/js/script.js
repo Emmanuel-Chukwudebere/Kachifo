@@ -242,18 +242,28 @@ function initApplication() {
         sessionStorage.setItem('session_id', data.session_id);
       }
       
-      // Determine which response field to use
-      let displayText = data.response || data.general_summary || '';
-      
       // Remove loading indicators
       typingBubble.innerHTML = "";
       
-      // If there are results, format them nicely
-      if (data.results && data.results.length > 0) {
+      // Determine how to display the response based on its type
+      if (data.type === 'query' || data.type === 'web_search' || (data.results && data.results.length > 0)) {
+        // For search results and web search, use the special formatting
         const resultsDisplay = formatResultsForDisplay(data);
         animateText(typingBubble, resultsDisplay);
-      } else {
-        // Just animate the text response
+      } 
+      else if (data.type === 'analysis' && data.analysis) {
+        // For analysis responses
+        animateText(typingBubble, data.analysis);
+      }
+      else if (data.response) {
+        // For conversation responses
+        animateText(typingBubble, data.response);
+      }
+      else {
+        // Fallback for any other response format
+        const displayText = data.general_summary || data.summary || 
+                           data.analysis || data.response || 
+                           "I processed your request but have no specific information to return.";
         animateText(typingBubble, displayText);
       }
     })
@@ -275,19 +285,42 @@ function initApplication() {
    */
   const formatResultsForDisplay = (data) => {
     if (!data.results || data.results.length === 0) {
-      return data.general_summary || "No results found for your query.";
+      return data.general_summary || data.response || "No results found for your query.";
     }
     
-    let formattedText = `${data.general_summary || "Here's what I found:"}\n\n`;
+    // Start with the general summary or analysis text if available
+    let formattedText = "";
+    if (data.general_summary) {
+      formattedText += `${data.general_summary}\n\n`;
+    } else if (data.analysis) {
+      formattedText += `${data.analysis}\n\n`;
+    } else if (data.response) {
+      formattedText += `${data.response}\n\n`;
+    } else {
+      formattedText += `Here's what I found about '${data.query || "your topic"}':\n\n`;
+    }
+    
+    // Add detailed results
+    formattedText += `DETAILED RESULTS:\n`;
     
     data.results.forEach((result, index) => {
-      formattedText += `${index + 1}. ${result.title} (${result.source})\n`;
-      if (result.summary) {
+      const sourceLabel = result.source ? ` (${result.source})` : '';
+      formattedText += `${index + 1}. ${result.title}${sourceLabel}\n`;
+      
+      // Include summary if available
+      if (result.summary && result.summary.trim() !== '') {
         formattedText += `   ${result.summary}\n`;
+      } else if (result.snippet && result.snippet.trim() !== '') {
+        formattedText += `   ${result.snippet}\n`;
       }
+      
+      // Always include URL if available
       if (result.url) {
-        formattedText += `   Learn more: ${result.url}\n`;
+        formattedText += `   Link: ${result.url}\n`;
+      } else if (result.link) {
+        formattedText += `   Link: ${result.link}\n`;
       }
+      
       formattedText += '\n';
     });
     

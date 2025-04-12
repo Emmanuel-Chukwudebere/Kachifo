@@ -139,7 +139,10 @@ def classify_input_type(user_input, conversation_history=None):
         followup_patterns = [
             r'\b(more|tell me more|continue|elaborate|explain further|can you explain|what about)\b',
             r'\b(why|how|what|when|where|who)\b',
-            r'\b(thanks|thank you|got it)\b'
+            r'\b(thanks|thank you|got it)\b',
+            r'\b(and|also|additionally|moreover|furthermore|besides)\b',
+            r'\b(details|specifics|examples|instances|cases)\b',
+            r'\b(compared to|versus|vs|difference between)\b'
         ]
         
         for pattern in followup_patterns:
@@ -148,25 +151,42 @@ def classify_input_type(user_input, conversation_history=None):
                     return 'query'
                 elif 'analyze' in prev_query.lower() or 'analysis' in prev_query.lower():
                     return 'analysis'
+                elif 'web' in prev_query.lower() or 'internet' in prev_query.lower() or 'online' in prev_query.lower():
+                    return 'web_search'
         
     # Patterns suggesting a search query intention
     query_pattern = re.compile(
-        r'\b(search|find|look up|what is|tell me about|trending|give me|show me)\b', 
+        r'\b(search|find|look up|what is|tell me about|trending|give me|show me|discover|explore|list|popular|top|best)\b', 
         re.IGNORECASE
     )
     
     # Patterns suggesting an analysis request
     analysis_pattern = re.compile(
-        r'\b(analyze|analysis|evaluate|review|compare|summarize|insights|opinion|thoughts on)\b',
+        r'\b(analyze|analysis|evaluate|review|compare|summarize|insights|opinion|thoughts on|perspective|breakdown|assessment|critique|examine|study)\b',
         re.IGNORECASE
     )
     
     # Web search pattern
     web_search_pattern = re.compile(
-        r'\b(web search|google|search online|current|latest|today|live|news|recent)\b',
+        r'\b(web search|google|search online|current|latest|today|live|news|recent|internet|web|online|right now|up to date|real time)\b',
         re.IGNORECASE
     )
     
+    # Topic-specific patterns that could indicate domain-specific searches
+    topic_patterns = {
+        'tech': re.compile(r'\b(technology|tech|AI|artificial intelligence|programming|software|hardware|digital|computer|app|application)\b', re.IGNORECASE),
+        'business': re.compile(r'\b(business|finance|company|market|stock|investment|economy|industry|startup|entrepreneur)\b', re.IGNORECASE),
+        'health': re.compile(r'\b(health|medical|wellness|nutrition|fitness|diet|exercise|doctor|hospital|treatment|therapy)\b', re.IGNORECASE),
+        'entertainment': re.compile(r'\b(movie|film|tv|television|show|series|music|song|artist|celebrity|entertainment)\b', re.IGNORECASE)
+    }
+    
+    # Check for topic-specific patterns first
+    for topic, pattern in topic_patterns.items():
+        if pattern.search(user_input):
+            # More likely to be a query if a specific topic is mentioned
+            return 'query'
+    
+    # Then check for general search patterns
     if web_search_pattern.search(user_input):
         return 'web_search'
     elif analysis_pattern.search(user_input):
@@ -174,6 +194,7 @@ def classify_input_type(user_input, conversation_history=None):
     elif query_pattern.search(user_input):
         return 'query'
     
+    # If no patterns match, it's likely a conversation
     return 'conversation'
 
 def get_conversation_history(session_id):

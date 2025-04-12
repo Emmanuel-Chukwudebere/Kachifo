@@ -282,7 +282,7 @@ def generate_conversational_response(user_input: str, conversation_history: List
                 # Use chat completion for Mistral
                 response = inference_bot.chat_completion(
                     messages=mistral_messages, 
-                    max_tokens=200,
+                    max_tokens=2000,
                     temperature=0.7
                 )
                 
@@ -314,7 +314,7 @@ def generate_conversational_response(user_input: str, conversation_history: List
                 
                 response = inference_bot.text_generation(
                     prompt=prompt, 
-                    max_new_tokens=200,
+                    max_new_tokens=2000,
                     temperature=0.7
                 )
                 content = response.get('generated_text', str(response))
@@ -339,7 +339,7 @@ def generate_conversational_response(user_input: str, conversation_history: List
             
             response = inference_bot.text_generation(
                 prompt=prompt, 
-                max_new_tokens=200,
+                max_new_tokens=2000,
                 temperature=0.7
             )
             
