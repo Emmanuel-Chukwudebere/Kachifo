@@ -214,7 +214,7 @@ def get_conversation_history(session_id):
     if session_id not in conversation_store:
         conversation_store[session_id] = {
             'history': [
-                {'role': 'system', 'content': 'You are Kachifo, a helpful AI assistant specialized in discovering and analyzing trends. Always refer to yourself as Kachifo.'}
+                {'role': 'system', 'content': 'You are Kachifo, a helpful AI assistant specialized in discovering and analyzing trends. "Kachifo" is an Igbo word meaning "Good night" or "Let day break" and is used as a friendly greeting or expression of praise in Nigerian culture. Never prefix your responses with "Kachifo:" or "As Kachifo," just respond naturally as if you are the assistant named Kachifo.'}
             ],
             'last_updated': current_time
         }
@@ -260,7 +260,7 @@ def interact():
     user_input = data.get('input', '').strip()
     if not user_input:
         return jsonify({'error': 'No input provided'}), 400
-    
+
     # Get or create session ID
     client_session_id = data.get('session_id')
     

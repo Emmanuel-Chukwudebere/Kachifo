@@ -89,6 +89,17 @@ function initApplication() {
   };
 
   /**
+   * Remove any Kachifo prefix from the response
+   * @param {string} text - Response text 
+   * @returns {string} - Cleaned response text
+   */
+  const removeKachifoPrefix = (text) => {
+    if (!text) return text;
+    // Remove prefixes like "Kachifo:", "As Kachifo,", etc.
+    return text.replace(/^(Kachifo:|As Kachifo,|I am Kachifo,|I'm Kachifo,)\s*/i, '');
+  };
+
+  /**
    * Create a chat bubble for user or Kachifo messages
    * @param {string} sender - 'user' or 'kachifo'
    * @param {boolean} isTyping - Whether to show typing animation
@@ -285,17 +296,18 @@ function initApplication() {
    */
   const formatResultsForDisplay = (data) => {
     if (!data.results || data.results.length === 0) {
-      return data.general_summary || data.response || "No results found for your query.";
+      const response = data.general_summary || data.response || "No results found for your query.";
+      return removeKachifoPrefix(response);
     }
     
     // Start with the general summary or analysis text if available
     let formattedText = "";
     if (data.general_summary) {
-      formattedText += `${data.general_summary}\n\n`;
+      formattedText += `${removeKachifoPrefix(data.general_summary)}\n\n`;
     } else if (data.analysis) {
-      formattedText += `${data.analysis}\n\n`;
+      formattedText += `${removeKachifoPrefix(data.analysis)}\n\n`;
     } else if (data.response) {
-      formattedText += `${data.response}\n\n`;
+      formattedText += `${removeKachifoPrefix(data.response)}\n\n`;
     } else {
       formattedText += `Here's what I found about '${data.query || "your topic"}':\n\n`;
     }
