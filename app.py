@@ -142,48 +142,92 @@ def classify_input_type(user_input, conversation_history=None):
             r'\b(thanks|thank you|got it)\b',
             r'\b(and|also|additionally|moreover|furthermore|besides)\b',
             r'\b(details|specifics|examples|instances|cases)\b',
-            r'\b(compared to|versus|vs|difference between)\b'
+            r'\b(compared to|versus|vs|difference between)\b',
+            r'\b(show me|display|list|share|tell me again|provide)\b',
+            r'\b(anything else|further|more information|elaborate on)\b',
+            r'\b(specifically|in particular|especially|notably|mainly)\b',
+            r'\b(deeper|further|additional|extra|supplementary)\b'
         ]
         
         for pattern in followup_patterns:
             if re.search(pattern, user_input, re.IGNORECASE):
-                if 'query' in prev_query.lower() or 'search' in prev_query.lower():
+                if 'query' in prev_query.lower() or 'search' in prev_query.lower() or 'find' in prev_query.lower():
                     return 'query'
-                elif 'analyze' in prev_query.lower() or 'analysis' in prev_query.lower():
+                elif 'analyze' in prev_query.lower() or 'analysis' in prev_query.lower() or 'insight' in prev_query.lower() or 'perspective' in prev_query.lower():
                     return 'analysis'
-                elif 'web' in prev_query.lower() or 'internet' in prev_query.lower() or 'online' in prev_query.lower():
+                elif 'web' in prev_query.lower() or 'internet' in prev_query.lower() or 'online' in prev_query.lower() or 'google' in prev_query.lower() or 'latest' in prev_query.lower():
                     return 'web_search'
+                
+        # Check for reference to previous topics in conversation history
+        for message in conversation_history[-3:]:  # Check last 3 messages
+            if message.get('role') == 'assistant' and any(keyword in message.get('content', '').lower() for keyword in ['search results', 'trending', 'analysis', 'latest']):
+                # If assistant previously provided search or trend info
+                if any(word in user_input.lower() for word in ['more', 'details', 'elaborate', 'continue']):
+                    if 'analysis' in message.get('content', '').lower():
+                        return 'analysis'
+                    elif any(term in message.get('content', '').lower() for term in ['search results', 'found', 'trending']):
+                        return 'query'
         
     # Patterns suggesting a search query intention
     query_pattern = re.compile(
-        r'\b(search|find|look up|what is|tell me about|trending|give me|show me|discover|explore|list|popular|top|best)\b', 
+        r'\b(search|find|look up|what is|tell me about|trending|give me|show me|discover|explore|list|popular|top|best|latest in|tell me more about|what\'s new in|whats happening|hot|trend|recommendation|suggest)\b', 
         re.IGNORECASE
     )
     
     # Patterns suggesting an analysis request
     analysis_pattern = re.compile(
-        r'\b(analyze|analysis|evaluate|review|compare|summarize|insights|opinion|thoughts on|perspective|breakdown|assessment|critique|examine|study)\b',
+        r'\b(analyze|analysis|evaluate|review|compare|summarize|insights|opinion|thoughts on|perspective|breakdown|assessment|critique|examine|study|interpret|explain why|understand|investigate|deep dive|details about|implications|impact of|meaning of|significance|important|relevance|context|synthesize|conclude|deduce)\b',
         re.IGNORECASE
     )
     
     # Web search pattern
     web_search_pattern = re.compile(
-        r'\b(web search|google|search online|current|latest|today|live|news|recent|internet|web|online|right now|up to date|real time)\b',
+        r'\b(web search|google|search online|current|latest|today|live|news|recent|internet|web|online|right now|up to date|real time|breaking news|just released|just published|fresh info|as of now|currently|presently|at this moment|development|update|what does the internet say|what\'s online|browser|search engine|find online|lookup online)\b',
         re.IGNORECASE
     )
     
+    # Explicit commands pattern
+    command_pattern = re.compile(
+        r'\b(search for|analyze the|search the web for|give me analysis of|tell me the latest on|find information about|lookup information on|get me details on|show data for|research about|investigate)\b',
+        re.IGNORECASE
+    )
+    
+    # Check for explicit commands first
+    if command_pattern.search(user_input):
+        if re.search(r'\b(search the web|search online|google)\b', user_input, re.IGNORECASE):
+            return 'web_search'
+        elif re.search(r'\b(analyze|analysis)\b', user_input, re.IGNORECASE):
+            return 'analysis'
+        else:
+            return 'query'
+    
     # Topic-specific patterns that could indicate domain-specific searches
     topic_patterns = {
-        'tech': re.compile(r'\b(technology|tech|AI|artificial intelligence|programming|software|hardware|digital|computer|app|application)\b', re.IGNORECASE),
-        'business': re.compile(r'\b(business|finance|company|market|stock|investment|economy|industry|startup|entrepreneur)\b', re.IGNORECASE),
-        'health': re.compile(r'\b(health|medical|wellness|nutrition|fitness|diet|exercise|doctor|hospital|treatment|therapy)\b', re.IGNORECASE),
-        'entertainment': re.compile(r'\b(movie|film|tv|television|show|series|music|song|artist|celebrity|entertainment)\b', re.IGNORECASE)
+        'tech': re.compile(r'\b(technology|tech|AI|artificial intelligence|programming|software|hardware|digital|computer|app|application|coding|developer|IT|information technology|data|algorithm|cybersecurity|internet of things|IoT|machine learning|ML|cloud|mobile|DevOps|blockchain|VR|AR|virtual reality|augmented reality)\b', re.IGNORECASE),
+        'business': re.compile(r'\b(business|finance|company|market|stock|investment|economy|industry|startup|entrepreneur|corporate|CEO|strategy|management|leadership|profit|revenue|ROI|sales|marketing|commerce|trade|SME|enterprise|B2B|B2C|retail|wholesale|supply chain|logistics|e-commerce)\b', re.IGNORECASE),
+        'health': re.compile(r'\b(health|medical|wellness|nutrition|fitness|diet|exercise|doctor|hospital|treatment|therapy|mental health|wellbeing|healthcare|medicine|disease|illness|condition|symptom|diagnosis|prescription|pharmaceutical|drug|vitamin|supplement|immunity|chronic|acute|pandemic|epidemic|virus|bacteria|psychology|psychiatry)\b', re.IGNORECASE),
+        'entertainment': re.compile(r'\b(movie|film|tv|television|show|series|music|song|artist|celebrity|entertainment|streaming|netflix|amazon prime|disney\+|hulu|hbo|spotify|youtube|actor|actress|director|producer|genre|award|oscar|emmy|grammy|box office|concert|theater|performance|video game|gaming|esports)\b', re.IGNORECASE),
+        'travel': re.compile(r'\b(travel|tourism|vacation|holiday|destination|trip|journey|tour|flight|hotel|resort|accommodation|booking|airbnb|sightseeing|attraction|landmark|tourist|visa|passport|international|domestic|adventure|cruise|beach|mountain|city break|backpacking|luxury travel)\b', re.IGNORECASE),
+        'education': re.compile(r'\b(education|school|university|college|degree|course|study|learn|student|teacher|professor|academic|research|thesis|dissertation|exam|test|grade|curriculum|lecture|class|subject|online learning|e-learning|scholarship|admission|graduation)\b', re.IGNORECASE)
     }
     
     # Check for topic-specific patterns first
     for topic, pattern in topic_patterns.items():
         if pattern.search(user_input):
             # More likely to be a query if a specific topic is mentioned
+            return 'query'
+    
+    # Question pattern - indicates information seeking behavior
+    question_pattern = re.compile(r'\b(who|what|where|when|why|how|is there|are there|can you|could you|would you|will you|should i|could i|can i)\b.*\?', re.IGNORECASE)
+    if question_pattern.search(user_input):
+        # Check if it's a web search question
+        if web_search_pattern.search(user_input):
+            return 'web_search'
+        # Check if it's an analysis question
+        elif analysis_pattern.search(user_input):
+            return 'analysis'
+        # Default to query for most questions
+        elif not re.search(r'\b(you|your|yourself)\b', user_input, re.IGNORECASE):  # Not asking about the assistant
             return 'query'
     
     # Then check for general search patterns
@@ -193,6 +237,14 @@ def classify_input_type(user_input, conversation_history=None):
         return 'analysis'
     elif query_pattern.search(user_input):
         return 'query'
+    
+    # Check for sentences that are clearly conversational
+    conversational_pattern = re.compile(
+        r'\b(hello|hi|hey|greetings|good morning|good afternoon|good evening|thanks|thank you|appreciate|how are you|nice to meet|pleased to|goodbye|bye|see you|talk to you|chat|converse|help me|assist me|your name|about you|tell me about yourself)\b',
+        re.IGNORECASE
+    )
+    if conversational_pattern.search(user_input):
+        return 'conversation'
     
     # If no patterns match, it's likely a conversation
     return 'conversation'
@@ -369,7 +421,15 @@ def process_web_search(query, session_id=None):
                 'snippet': result.get('snippet', 'No description available')
             })
         
-        response_text = f"Here's what I found online about '{query}':\n\n{summary}\n\n"
+        # Ensure the summary includes links to search results
+        links_section = "\n\nSources:\n"
+        for i, result in enumerate(formatted_results):
+            if result.get('url'):
+                links_section += f"{i+1}. {result.get('title', 'Source')}: {result.get('url')}\n"
+            elif result.get('link'):
+                links_section += f"{i+1}. {result.get('title', 'Source')}: {result.get('link')}\n"
+        
+        response_text = f"Here's what I found online about '{query}':\n\n{summary}{links_section}"
         
         final_response = {
             'query': query,
@@ -428,6 +488,16 @@ def process_analysis(query, session_id=None):
             # Extract snippets to analyze
             snippets = [result.get('snippet', '') for result in search_results]
             analysis_text = analyze_content(query, snippets)
+            
+            # Add source links to the analysis if they're not already included
+            links_section = "\n\nSources:\n"
+            for i, result in enumerate(search_results):
+                if result.get('link'):
+                    links_section += f"{i+1}. {result.get('title', 'Source')}: {result.get('link')}\n"
+            
+            # Add source links if they're not already in the analysis
+            if "Sources:" not in analysis_text and search_results:
+                analysis_text += links_section
         else:
             analysis_text = f"I couldn't find any recent information to analyze about '{query}'."
     else:
@@ -440,6 +510,14 @@ def process_analysis(query, session_id=None):
         
         # Perform analysis
         analysis_text = analyze_content(query, content_to_analyze)
+        
+        # Add source links to the analysis if they're not already included
+        if "Sources:" not in analysis_text and trend_data:
+            links_section = "\n\nSources:\n"
+            for i, item in enumerate(trend_data):
+                if item.get('url'):
+                    links_section += f"{i+1}. {item.get('title', 'Source')}: {item.get('url')}\n"
+            analysis_text += links_section
     
     # Create response format
     response_data = {
@@ -485,24 +563,35 @@ def process_search_query(query, session_id=None):
     for result in results:
         title = result.get('title', '')
         summary = result.get('summary', '')
+        url = result.get('url', '')
         
         # Create individual summary
         full_summary = summarize_with_hf(f"{title} {summary}")
         individual_summaries.append(full_summary)
+        
+        # Ensure URL is included in the summary if not already present
+        if url and url not in full_summary:
+            full_summary += f"\nSource: {url}"
         
         # Add to processed results
         processed_results.append({
             'source': result.get('source', ''),
             'title': title,
             'summary': full_summary,
-            'url': result.get('url', '')
+            'url': url
         })
     
     # Generate overall summary
     general_summary = generate_general_summary(individual_summaries)
     
-    # Add Kachifo personality to the summary
-    personalized_summary = f"Here's what I found about '{query}':\n\n{general_summary}"
+    # Create a section with links for easy reference
+    links_section = "\n\nSources:\n"
+    for i, result in enumerate(processed_results):
+        if result.get('url'):
+            links_section += f"{i+1}. {result.get('title', 'Source')}: {result.get('url')}\n"
+    
+    # Add clean summary and include links - make sure no Kachifo prefix
+    personalized_summary = f"Here's what I found about '{query}':\n\n{general_summary}{links_section}"
     
     # Prepare response
     final_response = {

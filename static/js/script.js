@@ -264,18 +264,18 @@ function initApplication() {
       } 
       else if (data.type === 'analysis' && data.analysis) {
         // For analysis responses
-        animateText(typingBubble, data.analysis);
+        animateText(typingBubble, removeKachifoPrefix(data.analysis));
       }
       else if (data.response) {
         // For conversation responses
-        animateText(typingBubble, data.response);
+        animateText(typingBubble, removeKachifoPrefix(data.response));
       }
       else {
         // Fallback for any other response format
         const displayText = data.general_summary || data.summary || 
                            data.analysis || data.response || 
                            "I processed your request but have no specific information to return.";
-        animateText(typingBubble, displayText);
+        animateText(typingBubble, removeKachifoPrefix(displayText));
       }
     })
     .catch(error => {
